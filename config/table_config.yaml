@@ -1,0 +1,213 @@
+SCHEMAS:
+  position:
+    schema_name: position
+    schema_fields:
+      UID:
+        field_aliases: [ uid ]
+        field_type: VARCHAR
+      UIDType:
+        field_aliases: [ uidtype ]
+        field_type: VARCHAR
+      LegId:
+        field_aliases: [ legid ]
+        field_type: VARCHAR
+      BusinessDate:
+        field_aliases: [ businessdate ]
+        field_type: INTEGER
+      TradeCurrency:
+        field_aliases: [ tradecurrency ]
+        field_type: VARCHAR
+      Quantity:
+        field_aliases: [ quantity ]
+        field_type: VARCHAR
+      FirmAccountMnemonic:
+        field_aliases: [ firmaccountmnemonic ]
+        field_type: VARCHAR
+    priority: 1
+    mandatory_fields: []
+    aggregation:                         
+      - field: Quantity
+        function: COUNT
+        alias: total_quantity
+    relations:
+      - name: positionrisk
+        alias: risk
+        type: ONE_TO_ONE
+        joinColumns:
+          - name: UID
+          - name: UIDType
+          - name: LegId
+          - name: BusinessDate
+      - name: riskbasedpaa
+        alias: pnl
+        type: ONE_TO_ONE
+        joinColumns:
+          - name: UID
+          - name: UIDType
+          - name: LegId
+          - name: BusinessDate
+      - name: dim_firmaccountmhl
+        alias: acct
+        type: MANY_TO_ONE
+        joinColumns:
+          - name: FirmAccountMnemonic
+            source: FirmAccountMnemonic
+            target: mnemonic
+  positionrisk:
+    schema_name: positionrisk
+    schema_fields:
+      UID:
+        field_aliases: [ uid ]
+        field_type: VARCHAR
+      UIDType:
+        field_aliases: [ uidtype ]
+        field_type: VARCHAR
+      LegId:
+        field_aliases: [ legid ]
+        field_type: VARCHAR
+      BusinessDate:
+        field_aliases: [ businessdate ]
+        field_type: INTEGER
+      MarkToMarketUSD:
+        field_aliases: [ marktomarketusd ]
+        field_type: DOUBLE PRECISION
+      JumpToDefault:
+        field_aliases: [ jumptodefault ]
+        field_type: DOUBLE PRECISION
+      CR01:
+        field_aliases: [ cr01 ]
+        field_type: DOUBLE PRECISION
+      CR10:
+        field_aliases: [ cr10 ]
+        field_type: DOUBLE PRECISION
+      JumpToRecovery:
+        field_aliases: [ jumptorecovery ]
+        field_type: DOUBLE PRECISION
+      Notionallocal:
+        field_aliases: [ notionallocal ]
+        field_type: DOUBLE PRECISION
+      NotionalUSD:
+        field_aliases: [ notionalusd ]
+        field_type: DOUBLE PRECISION
+    priority: 2
+    relations: []
+  riskbasedpaa:
+    schema_name: riskbasedpaa
+    schema_fields:
+      UID:
+        field_aliases: [ uid ]
+        field_type: VARCHAR
+      UIDType:
+        field_aliases: [ uidtype ]
+        field_type: VARCHAR
+      LegId:
+        field_aliases: [ legid ]
+        field_type: VARCHAR
+      BusinessDate:
+        field_aliases: [ businessdate ]
+        field_type: INTEGER
+      PnL:
+        field_aliases: [ pnl ]
+        field_type: DOUBLE PRECISION
+    priority: 3
+    relations: []
+  dim_firmaccountmhl:
+    schema_name: dim_firmaccountmhl
+    schema_fields:
+      mnemonic:
+        field_aliases: [ mnemonic ]
+        field_type: VARCHAR
+      mgd_seg_lv14_desc:
+        field_aliases: [ mgdseglv14desc ]
+        field_type: VARCHAR
+      mgd_seg_lv15_desc:
+        field_aliases: [ mgdseglv15desc ]
+        field_type: VARCHAR
+      mgd_seg_lvl6_desc:
+        field_aliases: [ mgdseglvl6desc ]
+        field_type: VARCHAR
+      mgd_seg_lvl7_desc:
+        field_aliases: [ mgdseglvl7desc ]
+        field_type: VARCHAR
+      mgd_seg_lvl8_desc:
+        field_aliases: [ mgdseglvl8desc ]
+        field_type: VARCHAR
+      mgd_seg_lvl9_desc:
+        field_aliases: [ mgdseglvl9desc ]
+        field_type: VARCHAR
+      mgd_seg_lvl10_desc:
+        field_aliases: [ mgdseglvl10desc ]
+        field_type: VARCHAR
+      mgd_seg_lvl11_desc:
+        field_aliases: [ mgdseglvl11desc ]
+        field_type: VARCHAR
+      mgd_seg_lvl12_desc:
+        field_aliases: [ mgdseglvl12desc ]
+        field_type: VARCHAR
+      mgd_seg_lvl13_desc:
+        field_aliases: [ mgdseglvl13desc ]
+        field_type: VARCHAR
+      mgd_seg_lvl14_desc:
+        field_aliases: [ mgdseglvl14desc ]
+        field_type: VARCHAR
+      volckerdeskid:
+        field_aliases: [ volckerdeskid ]
+        field_type: VARCHAR
+      volckerdeskname:
+        field_aliases: [ volckerdeskname ]
+        field_type: INTEGER
+    priority: 4
+    relations: []
+  profitloss:
+    schema_name: profitloss
+    schema_fields:
+      date:
+        field_aliases: [ date ]
+        field_type: DATE
+      closeddate:
+        field_aliases: [ closeddate ]
+        field_type: DATE
+      pnlsourcesystem:
+        field_aliases: [ pnlsourcesystem ]
+        field_type: VARCHAR
+      accountingtype:
+        field_aliases: [ accountingtype ]
+        field_type: VARCHAR
+      pnllineitemid:
+        field_aliases: [ pnllineitemid ]
+        field_type: VARCHAR
+      uipid:
+        field_aliases: [ uipid ]
+        field_type: VARCHAR
+      uitid:
+        field_aliases: [ uitid ]
+        field_type: VARCHAR
+      book:
+        field_aliases: [ book ]
+        field_type: VARCHAR
+      producttype:
+        field_aliases: [ producttype ]
+        field_type: VARCHAR
+      asofdatetimeutc:
+        field_aliases: [ asofdatetimeutc ]
+        field_type: TIMESTAMP
+      presentvalueusd:
+        field_aliases: [ presentvalueusd ]
+        field_type: DOUBLE PRECISION
+      pnlusd:
+        field_aliases: [ pnlusd ]
+        field_type: DOUBLE PRECISION
+      newpnlusd:
+        field_aliases: [ newpnlusd ]
+        field_type: DOUBLE PRECISION
+      existingpnlusd:
+        field_aliases: [ existingpnlusd ]
+        field_type: DOUBLE PRECISION
+      carryusd:
+        field_aliases: [ carryusd ]
+        field_type: DOUBLE PRECISION
+      loadtimeutc:
+        field_aliases: [ loadtimeutc ]
+        field_type: TIMESTAMP
+    priority: 5
+    relations: []
