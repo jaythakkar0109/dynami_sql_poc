@@ -1,16 +1,20 @@
 import os
 import yaml
 from typing import List, Any, Dict, Tuple, Union
-from app.schemas import GetDataParams, GetDataRecordsParams, FilterModel, MeasureModel, SortModel
+from app.schemas import GetDataParams, FilterModel, MeasureModel, SortModel
+
 
 class ValidationError(Exception):
     """Custom exception for structured validation errors."""
+
     def __init__(self, errors: List[Dict]):
         self.errors = errors
         super().__init__("Validation failed")
 
+
 class TableConfig:
-    def __init__(self, name: str, alias: str, priority: int, columns: List[Dict], relations: List[Dict] = None, mandatory_fields: List[str] = None, aggregations: List[Dict] = None):
+    def __init__(self, name: str, alias: str, priority: int, columns: List[Dict], relations: List[Dict] = None,
+                 mandatory_fields: List[str] = None, aggregations: List[Dict] = None):
         self.name = name
         self.alias = alias
         self.priority = priority
@@ -19,12 +23,14 @@ class TableConfig:
         self.mandatory_fields = mandatory_fields or []
         self.aggregations = aggregations or []
 
+
 class JoinRelation:
     def __init__(self, target_table: str, target_alias: str, join_type: str, join_columns: List[Dict]):
         self.target_table = target_table
         self.target_alias = target_alias
         self.join_type = join_type
         self.join_columns = join_columns
+
 
 class SQLBuilder:
     def __init__(self, config_path: str = "config/table_config.yaml"):
@@ -61,7 +67,8 @@ class SQLBuilder:
                 alias = table_data.get('schema_name')
                 priority = table_data.get('priority', 999)
                 columns = [
-                    {'name': field_name, 'field_aliases': field_data.get('field_aliases', []), 'field_type': field_data.get('field_type')}
+                    {'name': field_name, 'field_aliases': field_data.get('field_aliases', []),
+                     'field_type': field_data.get('field_type')}
                     for field_name, field_data in table_data.get('schema_fields', {}).items()
                 ]
                 relations = table_data.get('relations', [])
@@ -81,7 +88,9 @@ class SQLBuilder:
                 table_alias, col_name = column.split('.', 1)
                 if table_alias in self.table_configs:
                     table_config = self.table_configs[table_alias]
-                    if not any(col_def.get('name') == col_name or col_name in col_def.get('field_aliases', []) for col_def in table_config.columns):
+                    if not any(
+                            col_def.get('name') == col_name or col_name in col_def.get('field_aliases', []) for col_def
+                            in table_config.columns):
                         errors.append({
                             "field": "columns",
                             "message": f"Column '{column}' does not exist in table '{table_alias}'"
@@ -95,7 +104,8 @@ class SQLBuilder:
                 col_name = column
                 found = False
                 for table_config in self.table_configs.values():
-                    if any(col_def.get('name') == col_name or col_name in col_def.get('field_aliases', []) for col_def in table_config.columns):
+                    if any(col_def.get('name') == col_name or col_name in col_def.get('field_aliases', []) for col_def
+                           in table_config.columns):
                         found = True
                         break
                 if not found:
@@ -124,7 +134,8 @@ class SQLBuilder:
                     return col_def.get('field_type')
         return None
 
-    def _validate_filter_data_types(self, filters: List[FilterModel], column_to_table_map: Dict[str, TableConfig]) -> List[Dict]:
+    def _validate_filter_data_types(self, filters: List[FilterModel], column_to_table_map: Dict[str, TableConfig]) -> \
+    List[Dict]:
         """Validate the data types of values in filters."""
         errors = []
         type_mapping = {
@@ -213,7 +224,7 @@ class SQLBuilder:
         """Validate measure fields and functions."""
         errors = []
         valid_functions = {'SUM', 'COUNT', 'AVG', 'MAX', 'MIN'}
-        
+
         for i, measure in enumerate(measures):
             if not isinstance(measure, MeasureModel):
                 errors.append({
@@ -225,7 +236,7 @@ class SQLBuilder:
             column_errors = self._validate_columns([measure.field])
             if column_errors:
                 errors.extend([
-                    {**error, "field": "measures", "message": error["message"].replace("columns", "measures")} 
+                    {**error, "field": "measures", "message": error["message"].replace("columns", "measures")}
                     for error in column_errors
                 ])
 
@@ -254,7 +265,7 @@ class SQLBuilder:
                 relation_target_alias = relation.get('alias')
 
                 if (relation_target_name == table_config.name or
-                    relation_target_alias == table_config.alias):
+                        relation_target_alias == table_config.alias):
                     reverse_relation = {
                         'source_table': other_config.name,
                         'source_alias': other_config.alias,
@@ -268,11 +279,11 @@ class SQLBuilder:
 
         return reverse_relations
 
-    def build_query(self, params: Union[GetDataParams, GetDataRecordsParams]) -> Tuple[str, List[Any], str, List[Any]]:
+    def build_query(self, params: GetDataParams) -> Tuple[str, List[Any], str, List[Any]]:
         """Build complete SQL query from parameters."""
         all_errors = []
 
-        is_aggregated = isinstance(params, GetDataParams) and params.has_aggregations()
+        is_aggregated = params.is_aggregated()
         all_columns = params.get_all_columns()
 
         column_errors = self._validate_columns(all_columns)
@@ -284,7 +295,7 @@ class SQLBuilder:
             filter_errors = self._validate_filter_data_types(params.filterBy, column_to_table_map)
             all_errors.extend(filter_errors)
 
-        if isinstance(params, GetDataParams) and params.measures:
+        if params.measures:
             measure_errors = self._validate_measures(params.measures)
             all_errors.extend(measure_errors)
 
@@ -308,8 +319,6 @@ class SQLBuilder:
         main_query = self._construct_final_query()
         main_parameters = self.parameters.copy()
 
-        count_query = None
-        count_parameters = None
         count_query, count_parameters = self._build_count_query(main_table, join_tables, column_to_table_map)
 
         return main_query, main_parameters, count_query, count_parameters
@@ -326,7 +335,8 @@ class SQLBuilder:
         }
         self.parameters = []
 
-    def _get_explicitly_requested_tables(self, params: Union[GetDataParams, GetDataRecordsParams]) -> Tuple[Dict[str, TableConfig], Dict[str, TableConfig]]:
+    def _get_explicitly_requested_tables(self, params: GetDataParams) -> Tuple[
+        Dict[str, TableConfig], Dict[str, TableConfig]]:
         """Get tables explicitly requested in the query parameters."""
         set_a = {}
         column_to_table_map = {}
@@ -390,8 +400,8 @@ class SQLBuilder:
                 else:
                     for config in self.table_configs.values():
                         if (config.name == target_name or
-                            config.alias == target_alias or
-                            config.name == target_alias):
+                                config.alias == target_alias or
+                                config.name == target_alias):
                             target_config = config
                             break
 
@@ -411,8 +421,8 @@ class SQLBuilder:
 
                 for set_a_alias, set_a_config in set_a_tables.items():
                     if (relation_target_alias == set_a_alias or
-                        relation_target_name == set_a_config.name or
-                        relation_target_alias == set_a_config.alias):
+                            relation_target_name == set_a_config.name or
+                            relation_target_alias == set_a_config.alias):
                         has_relation_to_set_a = True
                         break
 
@@ -468,7 +478,7 @@ class SQLBuilder:
                 relation_target_name = relation.get('name')
 
                 if (relation_target_alias == target_table.alias or
-                    relation_target_name == target_table.name):
+                        relation_target_name == target_table.name):
                     return self._build_join_clause_new(joined_config, target_table, relation)
 
             reverse_relations = self._get_reverse_relations_for_table(target_table)
@@ -477,7 +487,7 @@ class SQLBuilder:
                 source_name = reverse_relation.get('source_table')
 
                 if (source_alias == joined_alias or
-                    source_name == joined_config.name):
+                        source_name == joined_config.name):
                     return self._build_join_clause_from_reverse(target_table, joined_config, reverse_relation)
 
         return None
@@ -514,7 +524,8 @@ class SQLBuilder:
 
         return None
 
-    def _build_join_clause_from_reverse(self, target_config: TableConfig, source_config: TableConfig, reverse_relation: Dict) -> str:
+    def _build_join_clause_from_reverse(self, target_config: TableConfig, source_config: TableConfig,
+                                        reverse_relation: Dict) -> str:
         """Build a JOIN clause from a reverse relation."""
         join_conditions = []
 
@@ -561,21 +572,24 @@ class SQLBuilder:
         }
         return type_mapping.get(relation_type.upper(), 'LEFT')
 
-    def _build_select_clause(self, params: Union[GetDataParams, GetDataRecordsParams], column_to_table_map: Dict[str, TableConfig], join_tables: Dict[str, TableConfig], is_aggregated: bool):
-        """Build SELECT clause based on the new payload structure."""
+    def _build_select_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig],
+                             join_tables: Dict[str, TableConfig], is_aggregated: bool):
+        """Build SELECT clause based on the payload structure."""
         select_items = []
 
-        if isinstance(params, GetDataParams):
-            if is_aggregated:
-                main_table = self._determine_main_table(join_tables)
-                for field in main_table.mandatory_fields:
-                    select_items.append(f"{main_table.alias}.{field}")
+        main_table = self._determine_main_table(join_tables)
 
-                for table_alias, table_config in join_tables.items():
-                    if table_alias != main_table.alias:
-                        for field in table_config.mandatory_fields:
-                            select_items.append(f"{table_alias}.{field}")
+        if is_aggregated:
+            # Include mandatory fields for aggregated queries
+            for field in main_table.mandatory_fields:
+                select_items.append(f"{main_table.alias}.{field}")
 
+            for table_alias, table_config in join_tables.items():
+                if table_alias != main_table.alias:
+                    for field in table_config.mandatory_fields:
+                        select_items.append(f"{table_alias}.{field}")
+
+            # Add groupBy columns
             for col in params.groupBy or []:
                 if '.' in col:
                     select_items.append(col)
@@ -584,29 +598,29 @@ class SQLBuilder:
                         table_config = column_to_table_map[col]
                         select_items.append(f"{table_config.alias}.{col}")
                     else:
-                        main_table = self._determine_main_table(join_tables)
                         select_items.append(f"{main_table.alias}.{col}")
 
+            # Add measures
             for measure in params.measures or []:
                 col = measure.field
                 if '.' not in col and col in column_to_table_map:
                     table_config = column_to_table_map[col]
                     col = f"{table_config.alias}.{col}"
-                
+
                 alias = f"{measure.function.lower()}_{measure.field.replace('.', '_')}"
                 select_items.append(f"{measure.function.upper()}({col}) AS {alias}")
 
-            if is_aggregated:
-                for table_alias, table_config in join_tables.items():
-                    for agg in table_config.aggregations:
-                        agg_field = agg.get('field')
-                        agg_function = agg.get('function', 'SUM').upper()
-                        agg_alias = agg.get('alias', f"{agg_function.lower()}_{agg_field}")
-                        if any(col_def.get('name') == agg_field for col_def in table_config.columns):
-                            select_items.append(f"{agg_function}({table_alias}.{agg_field}) AS {agg_alias}")
-
-        elif isinstance(params, GetDataRecordsParams):
-            for col in params.columns:
+            # Add table aggregations from config
+            for table_alias, table_config in join_tables.items():
+                for agg in table_config.aggregations:
+                    agg_field = agg.get('field')
+                    agg_function = agg.get('function', 'SUM').upper()
+                    agg_alias = agg.get('alias', f"{agg_function.lower()}_{agg_field}")
+                    if any(col_def.get('name') == agg_field for col_def in table_config.columns):
+                        select_items.append(f"{agg_function}({table_alias}.{agg_field}) AS {agg_alias}")
+        else:
+            # Non-aggregated: select groupBy columns (treated as columns to retrieve)
+            for col in params.groupBy or []:
                 if '.' in col:
                     select_items.append(col)
                 else:
@@ -614,16 +628,14 @@ class SQLBuilder:
                         table_config = column_to_table_map[col]
                         select_items.append(f"{table_config.alias}.{col}")
                     else:
-                        main_table = self._determine_main_table(join_tables)
                         select_items.append(f"{main_table.alias}.{col}")
 
         if not select_items:
-            main_table = self._determine_main_table(join_tables)
             select_items = [f"{main_table.alias}.*"]
 
         self.query_parts['select'] = select_items
 
-    def _build_where_clause(self, params: Union[GetDataParams, GetDataRecordsParams], column_to_table_map: Dict[str, TableConfig]):
+    def _build_where_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig]):
         """Build WHERE clause from filters."""
         if not params.filterBy:
             return
@@ -638,7 +650,8 @@ class SQLBuilder:
         if conditions:
             self.query_parts['where'] = [f"({' AND '.join(conditions)})"]
 
-    def _build_filter_condition(self, filter_obj: FilterModel, column_to_table_map: Dict[str, TableConfig]) -> Tuple[str, List[Any]]:
+    def _build_filter_condition(self, filter_obj: FilterModel, column_to_table_map: Dict[str, TableConfig]) -> Tuple[
+        str, List[Any]]:
         """Build individual filter condition."""
         column = filter_obj.field
         if '.' not in column and column in column_to_table_map:
@@ -665,12 +678,15 @@ class SQLBuilder:
 
         return None, []
 
-    def _build_group_by_clause(self, params: Union[GetDataParams, GetDataRecordsParams], column_to_table_map: Dict[str, TableConfig], join_tables: Dict[str, TableConfig], is_aggregated: bool):
+    def _build_group_by_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig],
+                               join_tables: Dict[str, TableConfig], is_aggregated: bool):
         """Build GROUP BY clause for aggregated queries."""
-        if not is_aggregated or not isinstance(params, GetDataParams):
+        if not is_aggregated:
             return
 
-        has_aggregates = any('(' in item and item.split('(')[0].upper() in {'COUNT', 'SUM', 'AVG', 'MAX', 'MIN'} for item in self.query_parts['select'])
+        has_aggregates = any(
+            '(' in item and item.split('(')[0].upper() in {'COUNT', 'SUM', 'AVG', 'MAX', 'MIN'} for item in
+            self.query_parts['select'])
         if not has_aggregates:
             return
 
@@ -699,7 +715,7 @@ class SQLBuilder:
         if group_by_items:
             self.query_parts['group_by'] = group_by_items
 
-    def _build_order_by_clause(self, params: Union[GetDataParams, GetDataRecordsParams], column_to_table_map: Dict[str, TableConfig]):
+    def _build_order_by_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig]):
         """Build ORDER BY clause from sortBy."""
         if not params.sortBy:
             return
@@ -710,17 +726,14 @@ class SQLBuilder:
             if '.' not in column and column in column_to_table_map:
                 table_config = column_to_table_map[column]
                 column = f"{table_config.alias}.{column}"
-            
+
             order_items.append(f"{column} {sort_obj.order}")
 
         if order_items:
             self.query_parts['order_by'] = f"ORDER BY {', '.join(order_items)}"
 
-    def _build_pagination(self, params: Union[GetDataParams, GetDataRecordsParams]):
+    def _build_pagination(self, params: GetDataParams):
         """Build LIMIT and OFFSET clauses."""
-        if params.complete_result:
-            return
-
         if params.page and params.page_size:
             limit = params.page_size
             offset = (params.page - 1) * params.page_size
@@ -728,7 +741,8 @@ class SQLBuilder:
             if offset > 0:
                 self.query_parts['offset'] = str(offset)
 
-    def _build_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig], column_to_table_map: Dict[str, TableConfig]) -> Tuple[str, List[Any]]:
+    def _build_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
+                           column_to_table_map: Dict[str, TableConfig]) -> Tuple[str, List[Any]]:
         """Build a query to compute the total count of matching rows."""
         count_parameters = self.parameters.copy()
 

@@ -55,10 +55,7 @@ class GetDataParams(BaseModel):
     filterBy: Optional[List[FilterModel]] = []
     sortBy: Optional[List[SortModel]] = []
     page: Optional[int] = 1
-    
-    # Internal fields for backward compatibility and processing
     page_size: Optional[int] = 10
-    complete_result: bool = False
 
     @validator('page')
     def page_gte_one(cls, v):
@@ -73,8 +70,10 @@ class GetDataParams(BaseModel):
         raise ValueError("Page size must be greater than or equal to 1")
 
     @validator('groupBy')
-    def groupBy_check(cls, v):
-        # groupBy can be empty for non-aggregated queries
+    def groupBy_check(cls, v, values):
+        measures = values.get('measures', [])
+        if not measures and not v:
+            raise ValueError("At least one of groupBy or measures must be provided for non-aggregated queries")
         return v or []
 
     @validator('measures')
@@ -92,80 +91,29 @@ class GetDataParams(BaseModel):
         # sortBy can be empty
         return v or []
 
-    def has_aggregations(self) -> bool:
-        """Check if this request has any aggregations/measures"""
+    def is_aggregated(self) -> bool:
+        """Check if the request requires aggregation"""
         return bool(self.measures)
 
     def get_all_columns(self) -> List[str]:
         """Get all columns referenced in the request"""
         columns = []
-        
+
         # Add groupBy columns
         columns.extend(self.groupBy or [])
-        
+
         # Add measure fields
         if self.measures:
             columns.extend([measure.field for measure in self.measures])
-        
+
         # Add filter fields
         if self.filterBy:
             columns.extend([filter_obj.field for filter_obj in self.filterBy])
-        
+
         # Add sort fields
         if self.sortBy:
             columns.extend([sort_obj.field for sort_obj in self.sortBy])
-        
-        return list(set(columns))  # Remove duplicates
 
-class GetDataRecordsParams(BaseModel):
-    """For non-aggregated record retrieval"""
-    columns: List[str]
-    filterBy: Optional[List[FilterModel]] = []
-    sortBy: Optional[List[SortModel]] = []
-    page: Optional[int] = 1
-    
-    # Internal fields
-    page_size: Optional[int] = 10
-    complete_result: bool = False
-
-    @validator('page')
-    def page_gte_one(cls, v):
-        if v is None or v >= 1:
-            return v
-        raise ValueError("Page must be greater than or equal to 1")
-
-    @validator('page_size')
-    def page_size_gte_one(cls, v):
-        if v is None or v >= 1:
-            return v
-        raise ValueError("Page size must be greater than or equal to 1")
-
-    @validator('columns')
-    def columns_check(cls, v):
-        if not v:
-            raise ValueError("Columns must be a non-empty list for record retrieval")
-        return v
-
-    @validator('filterBy')
-    def filterBy_check(cls, v):
-        return v or []
-
-    @validator('sortBy')
-    def sortBy_check(cls, v):
-        return v or []
-
-    def get_all_columns(self) -> List[str]:
-        """Get all columns referenced in the request"""
-        columns = list(self.columns)
-        
-        # Add filter fields
-        if self.filterBy:
-            columns.extend([filter_obj.field for filter_obj in self.filterBy])
-        
-        # Add sort fields
-        if self.sortBy:
-            columns.extend([sort_obj.field for sort_obj in self.sortBy])
-        
         return list(set(columns))  # Remove duplicates
 
 class QueryResponse(BaseModel):
