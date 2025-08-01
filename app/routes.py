@@ -7,8 +7,8 @@ import logging
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.post("/rates/risk/{datasource}/get-data", response_model=QueryResponse)
-async def execute_dynamic_query(datasource: str, params: GetDataParams):
+@router.post("/rates/risk/get-data", response_model=QueryResponse)
+async def execute_dynamic_query(params: GetDataParams):
     try:
         sql_builder = SQLBuilder()
         main_query, main_params, count_query, count_params = sql_builder.build_query(params)
@@ -21,11 +21,11 @@ async def execute_dynamic_query(datasource: str, params: GetDataParams):
 
         total_count = 0
         if count_query:
-            count_result = execute_query(count_query, count_params, datasource)
+            count_result = execute_query(count_query, count_params)
             if count_result and len(count_result) > 0:
                 total_count = count_result[0]["count"]
 
-        results = execute_query(main_query, main_params, datasource)
+        results = execute_query(main_query, main_params)
 
         response = QueryResponse(
             data=results,
