@@ -283,9 +283,7 @@ class SQLBuilder:
         """Build complete SQL query from parameters."""
         all_errors = []
 
-        is_aggregated = params.is_aggregated()
         all_columns = params.get_all_columns()
-
         column_errors = self._validate_columns(all_columns)
         if column_errors:
             all_errors.extend(column_errors)
@@ -308,8 +306,9 @@ class SQLBuilder:
         join_tables = self._find_tables_to_join(set_a_tables)
         main_table = self._determine_main_table(set_a_tables)
 
+        is_aggregated = params.is_aggregated()
         self._build_select_clause(params, column_to_table_map, join_tables, is_aggregated)
-        self._build_from_clause_with_alias(main_table)
+        self._build_from_clause_with_alias(main_table, params)
         self._build_join_clauses_new(main_table, join_tables)
         self._build_where_clause(params, column_to_table_map)
         self._build_group_by_clause(params, column_to_table_map, join_tables, is_aggregated)
@@ -445,9 +444,12 @@ class SQLBuilder:
         main_table = min(set_a_tables.values(), key=lambda x: x.priority)
         return main_table
 
-    def _build_from_clause_with_alias(self, table_config: TableConfig):
-        """Build FROM clause with table alias."""
-        self.query_parts['from'] = f"{table_config.name} AS {table_config.alias}"
+    def _build_from_clause_with_alias(self, table_config: TableConfig, params: GetDataParams):
+        """Build FROM clause, omitting alias for distinct-only queries."""
+        if params.is_distinct_only():
+            self.query_parts['from'] = f"{table_config.name}"
+        else:
+            self.query_parts['from'] = f"{table_config.name} AS {table_config.alias}"
 
     def _build_join_clauses_new(self, main_table: TableConfig, join_tables: Dict[str, TableConfig]):
         """Build JOIN clauses for all necessary tables."""
