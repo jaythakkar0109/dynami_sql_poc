@@ -2,6 +2,7 @@ from pydantic import BaseModel, validator
 from typing import List, Optional, Any, Dict
 from enum import Enum
 
+
 class AggregationEnum(str, Enum):
     COUNT = "COUNT"
     SUM = "SUM"
@@ -9,9 +10,11 @@ class AggregationEnum(str, Enum):
     MIN = "MIN"
     MAX = "MAX"
 
+
 class MeasureModel(BaseModel):
     field: str
     function: AggregationEnum
+
 
 class FilterModel(BaseModel):
     field: str
@@ -39,6 +42,7 @@ class FilterModel(BaseModel):
                 raise ValueError("EQUAL requires a single value")
         return v
 
+
 class SortModel(BaseModel):
     field: str
     order: str = "ASC"
@@ -48,6 +52,7 @@ class SortModel(BaseModel):
         if v.upper() not in ["ASC", "DESC"]:
             raise ValueError("Order must be ASC or DESC")
         return v.upper()
+
 
 class GetDataParams(BaseModel):
     measures: Optional[List[MeasureModel]] = []
@@ -78,22 +83,23 @@ class GetDataParams(BaseModel):
 
     @validator('measures')
     def measures_check(cls, v):
-        # measures can be empty for non-aggregated queries
         return v or []
 
     @validator('filterBy')
     def filterBy_check(cls, v):
-        # filterBy can be empty
         return v or []
 
     @validator('sortBy')
     def sortBy_check(cls, v):
-        # sortBy can be empty
         return v or []
 
     def is_aggregated(self) -> bool:
         """Check if the request requires aggregation"""
         return bool(self.measures)
+
+    def is_distinct_only(self) -> bool:
+        """Check if the request is for distinct groupBy values only"""
+        return bool(self.groupBy) and not self.measures and not self.filterBy and not self.sortBy
 
     def get_all_columns(self) -> List[str]:
         """Get all columns referenced in the request"""
@@ -116,12 +122,14 @@ class GetDataParams(BaseModel):
 
         return list(set(columns))  # Remove duplicates
 
+
 class QueryResponse(BaseModel):
     data: List[Dict[str, Any]]
     page: int
     page_size: int
     total_count: int = 0
     query: str
+
 
 # Legacy support - FilterCondition for backward compatibility
 class FilterCondition(BaseModel):
@@ -149,6 +157,7 @@ class FilterCondition(BaseModel):
             if v is None or isinstance(v, list):
                 raise ValueError("EQUAL requires a single value")
         return v
+
 
 # Legacy support - AggregationModel for backward compatibility
 class AggregationModel(BaseModel):

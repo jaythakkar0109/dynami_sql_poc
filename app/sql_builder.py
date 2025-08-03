@@ -319,7 +319,7 @@ class SQLBuilder:
         main_query = self._construct_final_query()
         main_parameters = self.parameters.copy()
 
-        count_query, count_parameters = self._build_count_query(main_table, join_tables, column_to_table_map)
+        count_query, count_parameters = self._build_count_query(main_table, join_tables, column_to_table_map, params)
 
         return main_query, main_parameters, count_query, count_parameters
 
@@ -576,11 +576,18 @@ class SQLBuilder:
                              join_tables: Dict[str, TableConfig], is_aggregated: bool):
         """Build SELECT clause based on the payload structure."""
         select_items = []
-
+        is_distinct_only = params.is_distinct_only()
         main_table = self._determine_main_table(join_tables)
 
-        if is_aggregated:
-            # Include mandatory fields for aggregated queries
+        if is_distinct_only:
+            # Distinct-only case: select groupBy columns with DISTINCT
+            for col in params.groupBy or []:
+                if '.' in col:
+                    select_items.append(col)
+                else:
+                    select_items.append(col)
+        elif is_aggregated:
+            # Aggregated query: include mandatory fields and measures
             for field in main_table.mandatory_fields:
                 select_items.append(f"{main_table.alias}.{field}")
 
@@ -619,21 +626,18 @@ class SQLBuilder:
                     if any(col_def.get('name') == agg_field for col_def in table_config.columns):
                         select_items.append(f"{agg_function}({table_alias}.{agg_field}) AS {agg_alias}")
         else:
-            # Non-aggregated: select groupBy columns (treated as columns to retrieve)
+            # Non-aggregated: select groupBy columns without table aliases
             for col in params.groupBy or []:
                 if '.' in col:
                     select_items.append(col)
                 else:
-                    if col in column_to_table_map:
-                        table_config = column_to_table_map[col]
-                        select_items.append(f"{table_config.alias}.{col}")
-                    else:
-                        select_items.append(f"{main_table.alias}.{col}")
+                    select_items.append(col)
 
         if not select_items:
             select_items = [f"{main_table.alias}.*"]
 
-        self.query_parts['select'] = select_items
+        # Apply DISTINCT for distinct-only case
+        self.query_parts['select'] = ['DISTINCT ' + ', '.join(select_items)] if is_distinct_only else select_items
 
     def _build_where_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig]):
         """Build WHERE clause from filters."""
@@ -742,27 +746,44 @@ class SQLBuilder:
                 self.query_parts['offset'] = str(offset)
 
     def _build_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
-                           column_to_table_map: Dict[str, TableConfig]) -> Tuple[str, List[Any]]:
+                           column_to_table_map: Dict[str, TableConfig], params: GetDataParams) -> Tuple[str, List[Any]]:
         """Build a query to compute the total count of matching rows."""
         count_parameters = self.parameters.copy()
 
         count_query_parts = []
-        count_query_parts.append("SELECT COUNT(*)")
-        count_query_parts.append(f"FROM {self.query_parts['from']}")
+        is_distinct_only = params.is_distinct_only()
 
-        for join in self.query_parts['joins']:
-            count_query_parts.append(join)
+        if is_distinct_only:
+            # Count distinct rows for groupBy-only case
+            select_items = []
+            for col in params.groupBy or []:
+                if '.' in col:
+                    select_items.append(col)
+                else:
+                    select_items.append(col)
+            count_query_parts.append(f"SELECT COUNT(*) FROM (SELECT DISTINCT {', '.join(select_items)}")
+            count_query_parts.append(f"FROM {self.query_parts['from']}")
+            for join in self.query_parts['joins']:
+                count_query_parts.append(join)
+            count_query_parts.append(") AS subquery")
+        else:
+            # Standard count query
+            count_query_parts.append("SELECT COUNT(*)")
+            count_query_parts.append(f"FROM {self.query_parts['from']}")
 
-        if self.query_parts['where']:
-            count_query_parts.append(f"WHERE {' AND '.join(self.query_parts['where'])}")
+            for join in self.query_parts['joins']:
+                count_query_parts.append(join)
 
-        if self.query_parts['group_by']:
-            count_query_parts = [
-                "SELECT COUNT(*) FROM (",
-                ' '.join(count_query_parts),
-                f"GROUP BY {', '.join(self.query_parts['group_by'])}",
-                ") AS subquery"
-            ]
+            if self.query_parts['where']:
+                count_query_parts.append(f"WHERE {' AND '.join(self.query_parts['where'])}")
+
+            if self.query_parts['group_by']:
+                count_query_parts = [
+                    "SELECT COUNT(*) FROM (",
+                    ' '.join(count_query_parts),
+                    f"GROUP BY {', '.join(self.query_parts['group_by'])}",
+                    ") AS subquery"
+                ]
 
         count_query = ' '.join(count_query_parts)
         return count_query, count_parameters
