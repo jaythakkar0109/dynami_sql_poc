@@ -31,7 +31,18 @@ class JoinRelation:
 
 
 class SQLBuilder:
-    def __init__(self, config_path: str = "config/table_config.yaml"):
+    def __init__(self, config_path: str = "config/table_config.yaml", count_strategy: str = "simple"):
+        """
+        Initialize SQLBuilder with configurable count strategy.
+
+        Args:
+            config_path: Path to table configuration YAML file
+            count_strategy: Strategy for counting records. Options:
+                - "simple": Use simple COUNT(*) without nested queries
+                - "distinct": Use COUNT(DISTINCT ...) for grouped queries
+                - "separate": Execute separate query to get count (requires post-processing)
+                - "estimate": Return estimated count based on result set size
+        """
         self.query_parts = {
             'select': [],
             'from': '',
@@ -43,6 +54,7 @@ class SQLBuilder:
         self.parameters = []
         self.table_configs = {}
         self.config_path = config_path
+        self.count_strategy = count_strategy
         self._load_table_configurations()
 
     def _load_table_configurations(self):
@@ -132,7 +144,7 @@ class SQLBuilder:
         return None
 
     def _validate_filter_data_types(self, filters: List[FilterModel], column_to_table_map: Dict[str, TableConfig]) -> \
-    List[Dict]:
+            List[Dict]:
         """Validate the data types of values in filters."""
         errors = []
         type_mapping = {
@@ -314,6 +326,180 @@ class SQLBuilder:
         count_query, count_parameters = self._build_count_query(main_table, join_tables, column_to_table_map, params)
 
         return main_query, main_parameters, count_query, count_parameters
+
+    def _build_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
+                              column_to_table_map: Dict[str, TableConfig], params: GetDataParams) -> Tuple[
+        str, List[Any]]:
+        """
+        Build count query using different strategies to avoid nested queries.
+        """
+        count_parameters = []
+
+        # Copy WHERE clause parameters for count query
+        if params.filterBy:
+            for filter_obj in params.filterBy:
+                _, params_values = self._build_filter_condition(filter_obj, column_to_table_map)
+                count_parameters.extend(params_values)
+
+        is_distinct_only = params.is_distinct_only()
+        is_aggregated = params.is_aggregated()
+
+        if self.count_strategy == "simple":
+            return self._build_simple_count_query(main_table, join_tables, params, count_parameters)
+        elif self.count_strategy == "distinct":
+            return self._build_distinct_count_query(main_table, join_tables, params, count_parameters, is_distinct_only)
+        elif self.count_strategy == "separate":
+            return self._build_separate_count_query(main_table, join_tables, params, count_parameters)
+        elif self.count_strategy == "estimate":
+            return self._build_estimate_count_query(main_table, join_tables, params, count_parameters)
+        else:
+            # Default to simple strategy
+            return self._build_simple_count_query(main_table, join_tables, params, count_parameters)
+
+    def _build_simple_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
+                                  params: GetDataParams, count_parameters: List[Any]) -> Tuple[str, List[Any]]:
+        """
+        Simple count strategy: Just count all matching rows, ignoring GROUP BY.
+        This gives an approximate count but avoids nested queries.
+        """
+        count_query_parts = ["SELECT COUNT(*)"]
+        count_query_parts.append(f"FROM {main_table.name}")
+
+        # Add joins
+        for join in self.query_parts['joins']:
+            count_query_parts.append(join)
+
+        # Add WHERE clause
+        if self.query_parts['where']:
+            count_query_parts.append(f"WHERE {' AND '.join(self.query_parts['where'])}")
+
+        count_query = ' '.join(count_query_parts)
+        return count_query, count_parameters
+
+    def _build_distinct_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
+                                    params: GetDataParams, count_parameters: List[Any],
+                                    is_distinct_only: bool) -> Tuple[str, List[Any]]:
+        """
+        Distinct count strategy: Use COUNT(DISTINCT ...) for grouped queries.
+        This works if your third-party API supports COUNT(DISTINCT).
+        """
+        if is_distinct_only and params.groupBy:
+            # For distinct-only queries, count distinct combinations
+            group_cols = []
+            for col in params.groupBy:
+                if '.' in col:
+                    table_name, col_name = col.split('.', 1)
+                    group_cols.append(col_name)
+                else:
+                    group_cols.append(col)
+
+            if len(group_cols) == 1:
+                count_select = f"COUNT(DISTINCT {group_cols[0]})"
+            else:
+                # For multiple columns, concatenate them
+                concat_cols = " || '|' || ".join(group_cols)
+                count_select = f"COUNT(DISTINCT ({concat_cols}))"
+        else:
+            count_select = "COUNT(*)"
+
+        count_query_parts = [f"SELECT {count_select}"]
+        count_query_parts.append(f"FROM {main_table.name}")
+
+        # Add joins
+        for join in self.query_parts['joins']:
+            count_query_parts.append(join)
+
+        # Add WHERE clause
+        if self.query_parts['where']:
+            count_query_parts.append(f"WHERE {' AND '.join(self.query_parts['where'])}")
+
+        count_query = ' '.join(count_query_parts)
+        return count_query, count_parameters
+
+    def _build_separate_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
+                                    params: GetDataParams, count_parameters: List[Any]) -> Tuple[str, List[Any]]:
+        """
+        Separate count strategy: Return a query that can be executed separately.
+        The application logic will need to handle this by executing the query
+        and counting the returned rows.
+        """
+        if params.groupBy:
+            # Return a query that selects the groupBy columns
+            # The application will count the returned rows
+            select_items = []
+            for col in params.groupBy:
+                if '.' in col:
+                    table_name, col_name = col.split('.', 1)
+                    select_items.append(col_name)
+                else:
+                    select_items.append(col)
+
+            count_query_parts = [f"SELECT DISTINCT {', '.join(select_items)}"]
+            count_query_parts.append(f"FROM {main_table.name}")
+
+            # Add joins
+            for join in self.query_parts['joins']:
+                count_query_parts.append(join)
+
+            # Add WHERE clause
+            if self.query_parts['where']:
+                count_query_parts.append(f"WHERE {' AND '.join(self.query_parts['where'])}")
+
+            count_query = ' '.join(count_query_parts)
+            return count_query, count_parameters
+        else:
+            # For non-grouped queries, use simple count
+            return self._build_simple_count_query(main_table, join_tables, params, count_parameters)
+
+    def _build_estimate_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
+                                    params: GetDataParams, count_parameters: List[Any]) -> Tuple[str, List[Any]]:
+        """
+        Estimate count strategy: Return a special marker query.
+        The application logic should detect this and provide an estimated count
+        based on the actual result set size.
+        """
+        # Return a special query that the application can detect
+        count_query = "SELECT -1 AS estimated_count"
+        return count_query, []
+
+    def get_count_from_results(self, count_result: List[Dict], main_results: List[Dict],
+                               params: GetDataParams) -> int:
+        """
+        Helper method to extract count from count query results based on strategy.
+
+        Args:
+            count_result: Result from count query
+            main_results: Result from main query (used for estimation)
+            params: Original query parameters
+
+        Returns:
+            Total count as integer
+        """
+        if not count_result:
+            return 0
+
+        if self.count_strategy == "separate":
+            # For separate strategy, count the rows returned
+            return len(count_result)
+        elif self.count_strategy == "estimate":
+            # For estimate strategy, use the main result set size as basis
+            if count_result[0].get('estimated_count') == -1:
+                # Provide estimated count based on page size and current results
+                result_count = len(main_results)
+                if params.page and params.page_size:
+                    if result_count == params.page_size:
+                        # Estimate there might be more pages
+                        return params.page * params.page_size + params.page_size
+                    else:
+                        # This is likely the last page
+                        return (params.page - 1) * params.page_size + result_count
+                return result_count
+        else:
+            # For simple and distinct strategies, return the count value
+            count_key = next(iter(count_result[0].keys()))
+            return count_result[0][count_key]
+
+    # ... [Rest of the methods remain the same] ...
 
     def _reset(self):
         """Reset query builder state"""
@@ -719,50 +905,6 @@ class SQLBuilder:
             self.query_parts['limit'] = str(limit)
             if offset > 0:
                 self.query_parts['offset'] = str(offset)
-
-    def _build_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
-                           column_to_table_map: Dict[str, TableConfig], params: GetDataParams) -> Tuple[str, List[Any]]:
-        """Build a query to compute the total count of matching rows without aliases."""
-        count_parameters = self.parameters.copy()
-
-        count_query_parts = []
-        is_distinct_only = params.is_distinct_only()
-
-        if is_distinct_only:
-            # Count distinct rows for groupBy-only case
-            select_items = []
-            for col in params.groupBy or []:
-                if '.' in col:
-                    table_name, col_name = col.split('.', 1)
-                    select_items.append(col_name)
-                else:
-                    select_items.append(col)
-            count_query_parts.append(f"SELECT COUNT(*) FROM (SELECT DISTINCT {', '.join(select_items)}")
-            count_query_parts.append(f"FROM {self.query_parts['from']}")
-            for join in self.query_parts['joins']:
-                count_query_parts.append(join)
-            count_query_parts.append(") AS subquery")
-        else:
-            # Standard count query
-            count_query_parts.append("SELECT COUNT(*)")
-            count_query_parts.append(f"FROM {self.query_parts['from']}")
-
-            for join in self.query_parts['joins']:
-                count_query_parts.append(join)
-
-            if self.query_parts['where']:
-                count_query_parts.append(f"WHERE {' AND '.join(self.query_parts['where'])}")
-
-            if self.query_parts['group_by']:
-                count_query_parts = [
-                    "SELECT COUNT(*) FROM (",
-                    ' '.join(count_query_parts),
-                    f"GROUP BY {', '.join(self.query_parts['group_by'])}",
-                    ") AS subquery"
-                ]
-
-        count_query = ' '.join(count_query_parts)
-        return count_query, count_parameters
 
     def _construct_final_query(self) -> str:
         """Construct the final SQL query."""
