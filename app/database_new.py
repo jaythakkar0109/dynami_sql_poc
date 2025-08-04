@@ -8,7 +8,7 @@ import psycopg2
 
 logger = logging.getLogger(__name__)
 
-def execute_query(query: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+def execute_query(query: str, params: Optional[List[Any]] = None, is_count_query: bool = False) -> List[Dict[str, Any]]:
     """Execute a query via API and return results as list of dictionaries"""
     try:
         if params:
@@ -28,6 +28,14 @@ def execute_query(query: str, params: Optional[List[Any]] = None) -> List[Dict[s
         response.raise_for_status()
 
         result_data = response.json()
+
+        if is_count_query:
+            if "rows" not in result_data or not result_data["rows"]:
+                logger.warning("No rows in count query response, returning empty result")
+                return [{"count": 0}]
+
+            return [{"count": result_data["rows"][0][0]}]
+
         if "resultTable" not in result_data:
             logger.error("Invalid response format: 'resultTable' key missing")
             raise ValueError("Invalid response format from API")
