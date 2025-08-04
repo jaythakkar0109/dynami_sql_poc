@@ -13,7 +13,15 @@ class AggregationEnum(str, Enum):
 
 class MeasureModel(BaseModel):
     field: str
-    function: AggregationEnum
+    function: str
+
+    @validator('function')
+    def valid_function(cls, v):
+        valid_functions = {'count', 'sum', 'avg', 'min', 'max'}
+        normalized = v.upper()
+        if normalized.lower() not in valid_functions:
+            raise ValueError(f"Function must be one of {valid_functions}")
+        return normalized  # Normalize to uppercase: COUNT, SUM, AVG, MIN, MAX
 
 
 class FilterModel(BaseModel):
@@ -23,10 +31,11 @@ class FilterModel(BaseModel):
 
     @validator('operator')
     def valid_operator(cls, v):
-        valid_operators = {'EQUAL', 'IN', 'BETWEEN', 'INLIST'}
-        if v.upper() not in valid_operators:
+        valid_operators = {'equal', 'in', 'between', 'inlist'}
+        normalized = v.upper()
+        if normalized.lower() not in valid_operators:
             raise ValueError(f"Operator must be one of {valid_operators}")
-        return v.upper()
+        return normalized  # Normalize to uppercase: EQUAL, IN, BETWEEN, INLIST
 
     @validator('values')
     def validate_values(cls, v, values):
@@ -49,9 +58,11 @@ class SortModel(BaseModel):
 
     @validator('order')
     def valid_order(cls, v):
-        if v.upper() not in ["ASC", "DESC"]:
+        valid_orders = {'asc', 'desc'}
+        normalized = v.upper()
+        if normalized.lower() not in valid_orders:
             raise ValueError("Order must be ASC or DESC")
-        return v.upper()
+        return normalized  # Normalize to uppercase: ASC, DESC
 
 
 class GetDataParams(BaseModel):
@@ -75,10 +86,9 @@ class GetDataParams(BaseModel):
         raise ValueError("Page size must be greater than or equal to 1")
 
     @validator('groupBy')
-    def groupBy_check(cls, v, values):
-        measures = values.get('measures', [])
-        if not measures and not v:
-            raise ValueError("At least one of groupBy or measures must be provided for non-aggregated queries")
+    def groupBy_check(cls, v):
+        if not v:
+            raise ValueError("groupBy must be provided with at least one column")
         return v or []
 
     @validator('measures')
@@ -139,10 +149,11 @@ class FilterCondition(BaseModel):
 
     @validator('operator')
     def valid_operator(cls, v):
-        valid_operators = {'EQUAL', 'IN', 'BETWEEN'}
-        if v.upper() not in valid_operators:
+        valid_operators = {'equal', 'in', 'between'}
+        normalized = v.upper()
+        if normalized.lower() not in valid_operators:
             raise ValueError(f"Operator must be one of {valid_operators}")
-        return v.upper()
+        return normalized
 
     @validator('values')
     def validate_values(cls, v, values):
