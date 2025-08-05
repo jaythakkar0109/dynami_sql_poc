@@ -499,8 +499,6 @@ class SQLBuilder:
             count_key = next(iter(count_result[0].keys()))
             return count_result[0][count_key]
 
-    # ... [Rest of the methods remain the same] ...
-
     def _reset(self):
         """Reset query builder state"""
         self.query_parts = {
@@ -787,13 +785,18 @@ class SQLBuilder:
                     if any(col_def.get('name') == agg_field for col_def in table_config.columns):
                         select_items.append(f"{agg_function}({agg_field}) AS {agg_alias}")
         else:
-            # Non-aggregated: select groupBy columns without table prefixes
-            for col in params.groupBy or []:
-                if '.' in col:
-                    table_name, col_name = col.split('.', 1)
-                    select_items.append(col_name)
-                else:
-                    select_items.append(col)
+            # Non-aggregated query: select all columns when groupBy is empty, otherwise use specified columns
+            if not params.groupBy:
+                select_items = ["*"]  # Select all columns when groupBy is empty
+            else:
+                # Use specified groupBy columns for non-aggregated but grouped queries
+                all_columns = params.get_all_columns()
+                for col in all_columns:
+                    if '.' in col:
+                        table_name, col_name = col.split('.', 1)
+                        select_items.append(col_name)
+                    else:
+                        select_items.append(col)
 
         if not select_items:
             select_items = ["*"]

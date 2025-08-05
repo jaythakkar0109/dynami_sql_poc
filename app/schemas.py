@@ -85,12 +85,6 @@ class GetDataParams(BaseModel):
             return v
         raise ValueError("Page size must be greater than or equal to 1")
 
-    @validator('groupBy')
-    def groupBy_check(cls, v):
-        if not v:
-            raise ValueError("groupBy must be provided with at least one column")
-        return v or []
-
     @validator('measures')
     def measures_check(cls, v):
         return v or []
