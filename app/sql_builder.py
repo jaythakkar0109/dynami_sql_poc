@@ -5,8 +5,6 @@ from app.schemas import GetDataParams, FilterModel, MeasureModel, SortModel
 
 
 class ValidationError(Exception):
-    """Custom exception for structured validation errors."""
-
     def __init__(self, errors: List[Dict]):
         self.errors = errors
         super().__init__("Validation failed")
@@ -32,17 +30,6 @@ class JoinRelation:
 
 class SQLBuilder:
     def __init__(self, config_path: str = "config/table_config.yaml", count_strategy: str = "simple"):
-        """
-        Initialize SQLBuilder with configurable count strategy.
-
-        Args:
-            config_path: Path to table configuration YAML file
-            count_strategy: Strategy for counting records. Options:
-                - "simple": Use simple COUNT(*) without nested queries
-                - "distinct": Use COUNT(DISTINCT ...) for grouped queries
-                - "separate": Execute separate query to get count (requires post-processing)
-                - "estimate": Return estimated count based on result set size
-        """
         self.query_parts = {
             'select': [],
             'from': '',
@@ -58,7 +45,6 @@ class SQLBuilder:
         self._load_table_configurations()
 
     def _load_table_configurations(self):
-        """Load table configurations from YAML file"""
         try:
             if os.path.exists(self.config_path):
                 with open(self.config_path, 'r') as file:
@@ -70,7 +56,6 @@ class SQLBuilder:
             print(f"Error loading configuration: {e}")
 
     def _parse_table_configs(self, config_data: Dict):
-        """Parse YAML configuration into table config objects"""
         if 'SCHEMAS' in config_data:
             for schema_name, table_data in config_data['SCHEMAS'].items():
                 name = table_data.get('schema_name')
@@ -89,7 +74,6 @@ class SQLBuilder:
                     self.table_configs[name] = config
 
     def _validate_columns(self, columns: List[str]) -> List[Dict]:
-        """Validate that the given columns exist in the table configurations."""
         errors = []
 
         for column in columns:
@@ -126,7 +110,6 @@ class SQLBuilder:
         return errors
 
     def _get_column_data_type(self, column: str, column_to_table_map: Dict[str, TableConfig]) -> str:
-        """Get the expected data type of a column from the table configuration."""
         table_name = None
         col_name = column
 
@@ -145,7 +128,6 @@ class SQLBuilder:
 
     def _validate_filter_data_types(self, filters: List[FilterModel], column_to_table_map: Dict[str, TableConfig]) -> \
             List[Dict]:
-        """Validate the data types of values in filters."""
         errors = []
         type_mapping = {
             'varchar': (str,),
@@ -230,7 +212,6 @@ class SQLBuilder:
         return errors
 
     def _validate_measures(self, measures: List[MeasureModel]) -> List[Dict]:
-        """Validate measure fields and functions."""
         errors = []
         valid_functions = {'SUM', 'COUNT', 'AVG', 'MAX', 'MIN'}
 
@@ -258,11 +239,9 @@ class SQLBuilder:
         return errors
 
     def _get_relations_for_table(self, table_config: TableConfig) -> List[Dict]:
-        """Get all relations for a table"""
         return table_config.relations
 
     def _get_reverse_relations_for_table(self, table_config: TableConfig) -> List[Dict]:
-        """Get relations where this table is the target (reverse relations)"""
         reverse_relations = []
 
         for other_name, other_config in self.table_configs.items():
@@ -285,7 +264,6 @@ class SQLBuilder:
         return reverse_relations
 
     def build_query(self, params: GetDataParams) -> Tuple[str, List[Any], str, List[Any]]:
-        """Build complete SQL query from parameters."""
         all_errors = []
 
         all_columns = params.get_all_columns()
@@ -330,12 +308,8 @@ class SQLBuilder:
     def _build_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
                               column_to_table_map: Dict[str, TableConfig], params: GetDataParams) -> Tuple[
         str, List[Any]]:
-        """
-        Build count query using different strategies to avoid nested queries.
-        """
         count_parameters = []
 
-        # Copy WHERE clause parameters for count query
         if params.filterBy:
             for filter_obj in params.filterBy:
                 _, params_values = self._build_filter_condition(filter_obj, column_to_table_map)
@@ -353,23 +327,16 @@ class SQLBuilder:
         elif self.count_strategy == "estimate":
             return self._build_estimate_count_query(main_table, join_tables, params, count_parameters)
         else:
-            # Default to simple strategy
             return self._build_simple_count_query(main_table, join_tables, params, count_parameters)
 
     def _build_simple_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
                                   params: GetDataParams, count_parameters: List[Any]) -> Tuple[str, List[Any]]:
-        """
-        Simple count strategy: Just count all matching rows, ignoring GROUP BY.
-        This gives an approximate count but avoids nested queries.
-        """
         count_query_parts = ["SELECT COUNT(*)"]
         count_query_parts.append(f"FROM {main_table.name}")
 
-        # Add joins
         for join in self.query_parts['joins']:
             count_query_parts.append(join)
 
-        # Add WHERE clause
         if self.query_parts['where']:
             count_query_parts.append(f"WHERE {' AND '.join(self.query_parts['where'])}")
 
@@ -379,12 +346,7 @@ class SQLBuilder:
     def _build_distinct_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
                                     params: GetDataParams, count_parameters: List[Any],
                                     is_distinct_only: bool) -> Tuple[str, List[Any]]:
-        """
-        Distinct count strategy: Use COUNT(DISTINCT ...) for grouped queries.
-        This works if your third-party API supports COUNT(DISTINCT).
-        """
         if is_distinct_only and params.groupBy:
-            # For distinct-only queries, count distinct combinations
             group_cols = []
             for col in params.groupBy:
                 if '.' in col:
@@ -396,7 +358,6 @@ class SQLBuilder:
             if len(group_cols) == 1:
                 count_select = f"COUNT(DISTINCT {group_cols[0]})"
             else:
-                # For multiple columns, concatenate them
                 concat_cols = " || '|' || ".join(group_cols)
                 count_select = f"COUNT(DISTINCT ({concat_cols}))"
         else:
@@ -405,11 +366,9 @@ class SQLBuilder:
         count_query_parts = [f"SELECT {count_select}"]
         count_query_parts.append(f"FROM {main_table.name}")
 
-        # Add joins
         for join in self.query_parts['joins']:
             count_query_parts.append(join)
 
-        # Add WHERE clause
         if self.query_parts['where']:
             count_query_parts.append(f"WHERE {' AND '.join(self.query_parts['where'])}")
 
@@ -418,14 +377,7 @@ class SQLBuilder:
 
     def _build_separate_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
                                     params: GetDataParams, count_parameters: List[Any]) -> Tuple[str, List[Any]]:
-        """
-        Separate count strategy: Return a query that can be executed separately.
-        The application logic will need to handle this by executing the query
-        and counting the returned rows.
-        """
         if params.groupBy:
-            # Return a query that selects the groupBy columns
-            # The application will count the returned rows
             select_items = []
             for col in params.groupBy:
                 if '.' in col:
@@ -437,70 +389,43 @@ class SQLBuilder:
             count_query_parts = [f"SELECT DISTINCT {', '.join(select_items)}"]
             count_query_parts.append(f"FROM {main_table.name}")
 
-            # Add joins
             for join in self.query_parts['joins']:
                 count_query_parts.append(join)
 
-            # Add WHERE clause
             if self.query_parts['where']:
                 count_query_parts.append(f"WHERE {' AND '.join(self.query_parts['where'])}")
 
             count_query = ' '.join(count_query_parts)
             return count_query, count_parameters
         else:
-            # For non-grouped queries, use simple count
             return self._build_simple_count_query(main_table, join_tables, params, count_parameters)
 
     def _build_estimate_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
                                     params: GetDataParams, count_parameters: List[Any]) -> Tuple[str, List[Any]]:
-        """
-        Estimate count strategy: Return a special marker query.
-        The application logic should detect this and provide an estimated count
-        based on the actual result set size.
-        """
-        # Return a special query that the application can detect
         count_query = "SELECT -1 AS estimated_count"
         return count_query, []
 
     def get_count_from_results(self, count_result: List[Dict], main_results: List[Dict],
                                params: GetDataParams) -> int:
-        """
-        Helper method to extract count from count query results based on strategy.
-
-        Args:
-            count_result: Result from count query
-            main_results: Result from main query (used for estimation)
-            params: Original query parameters
-
-        Returns:
-            Total count as integer
-        """
         if not count_result:
             return 0
 
         if self.count_strategy == "separate":
-            # For separate strategy, count the rows returned
             return len(count_result)
         elif self.count_strategy == "estimate":
-            # For estimate strategy, use the main result set size as basis
             if count_result[0].get('estimated_count') == -1:
-                # Provide estimated count based on page size and current results
                 result_count = len(main_results)
                 if params.page and params.page_size:
                     if result_count == params.page_size:
-                        # Estimate there might be more pages
                         return params.page * params.page_size + params.page_size
                     else:
-                        # This is likely the last page
                         return (params.page - 1) * params.page_size + result_count
                 return result_count
         else:
-            # For simple and distinct strategies, return the count value
             count_key = next(iter(count_result[0].keys()))
             return count_result[0][count_key]
 
     def _reset(self):
-        """Reset query builder state"""
         self.query_parts = {
             'select': [],
             'from': '',
@@ -513,7 +438,6 @@ class SQLBuilder:
 
     def _get_explicitly_requested_tables(self, params: GetDataParams) -> Tuple[
         Dict[str, TableConfig], Dict[str, TableConfig]]:
-        """Get tables explicitly requested in the query parameters."""
         set_a = {}
         column_to_table_map = {}
         all_columns = params.get_all_columns()
@@ -560,7 +484,6 @@ class SQLBuilder:
         return set_a, column_to_table_map
 
     def _find_tables_to_join(self, set_a_tables: Dict[str, TableConfig]) -> Dict[str, TableConfig]:
-        """Find all tables that need to be joined based on relations."""
         join_tables = dict(set_a_tables)
 
         for set_a_name, set_a_config in set_a_tables.items():
@@ -600,7 +523,6 @@ class SQLBuilder:
         return join_tables
 
     def _determine_main_table(self, set_a_tables: Dict[str, TableConfig]) -> TableConfig:
-        """Determine the main table based on priority."""
         if not set_a_tables:
             raise ValidationError([{
                 "field": "columns",
@@ -611,11 +533,9 @@ class SQLBuilder:
         return main_table
 
     def _build_from_clause(self, table_config: TableConfig):
-        """Build FROM clause without alias."""
         self.query_parts['from'] = f"{table_config.name}"
 
     def _build_join_clauses(self, main_table: TableConfig, join_tables: Dict[str, TableConfig]):
-        """Build JOIN clauses for all necessary tables without aliases."""
         if not join_tables:
             return
 
@@ -636,7 +556,6 @@ class SQLBuilder:
                     f"Warning: No join path found for table {target_table.name}. This may cause ambiguity in column names.")
 
     def _find_join_path(self, target_table: TableConfig, joined_tables: Dict[str, TableConfig]) -> str:
-        """Find a valid join path to the target table."""
         for joined_name, joined_config in joined_tables.items():
             all_relations = self._get_relations_for_table(joined_config)
             for relation in all_relations:
@@ -655,7 +574,6 @@ class SQLBuilder:
         return None
 
     def _build_join_clause(self, source_config: TableConfig, target_config: TableConfig, relation: Dict) -> str:
-        """Build a JOIN clause from a relation without aliases."""
         join_conditions = []
 
         join_columns = relation.get('joinColumns', [])
@@ -688,7 +606,6 @@ class SQLBuilder:
 
     def _build_join_clause_from_reverse(self, target_config: TableConfig, source_config: TableConfig,
                                         reverse_relation: Dict) -> str:
-        """Build a JOIN clause from a reverse relation without aliases."""
         join_conditions = []
 
         original_relation = reverse_relation.get('original_relation', {})
@@ -721,7 +638,6 @@ class SQLBuilder:
         return None
 
     def _convert_join_type(self, relation_type: str) -> str:
-        """Convert relation type to SQL JOIN type."""
         type_mapping = {
             'ONE_TO_ONE': 'LEFT',
             'ONE_TO_MANY': 'LEFT',
@@ -736,13 +652,11 @@ class SQLBuilder:
 
     def _build_select_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig],
                              join_tables: Dict[str, TableConfig], is_aggregated: bool):
-        """Build SELECT clause without table aliases."""
         select_items = []
         is_distinct_only = params.is_distinct_only()
         main_table = self._determine_main_table(join_tables)
 
         if is_distinct_only:
-            # Distinct-only case: select groupBy columns without table prefixes
             for col in params.groupBy or []:
                 if '.' in col:
                     table_name, col_name = col.split('.', 1)
@@ -750,7 +664,6 @@ class SQLBuilder:
                 else:
                     select_items.append(col)
         elif is_aggregated:
-            # Aggregated query: include mandatory fields and measures
             for field in main_table.mandatory_fields:
                 select_items.append(f"{field}")
 
@@ -759,7 +672,6 @@ class SQLBuilder:
                     for field in table_config.mandatory_fields:
                         select_items.append(f"{field}")
 
-            # Add groupBy columns
             for col in params.groupBy or []:
                 if '.' in col:
                     table_name, col_name = col.split('.', 1)
@@ -767,7 +679,6 @@ class SQLBuilder:
                 else:
                     select_items.append(col)
 
-            # Add measures
             for measure in params.measures or []:
                 col = measure.field
                 if '.' in col:
@@ -776,7 +687,6 @@ class SQLBuilder:
                 alias = f"{measure.function.lower()}_{col.replace('.', '_')}"
                 select_items.append(f"{measure.function.upper()}({col}) AS {alias}")
 
-            # Add table aggregations from config
             for table_name, table_config in join_tables.items():
                 for agg in table_config.aggregations:
                     agg_field = agg.get('field')
@@ -785,11 +695,9 @@ class SQLBuilder:
                     if any(col_def.get('name') == agg_field for col_def in table_config.columns):
                         select_items.append(f"{agg_function}({agg_field}) AS {agg_alias}")
         else:
-            # Non-aggregated query: select all columns when groupBy is empty, otherwise use specified columns
             if not params.groupBy:
-                select_items = ["*"]  # Select all columns when groupBy is empty
+                select_items = ["*"]
             else:
-                # Use specified groupBy columns for non-aggregated but grouped queries
                 all_columns = params.get_all_columns()
                 for col in all_columns:
                     if '.' in col:
@@ -801,11 +709,9 @@ class SQLBuilder:
         if not select_items:
             select_items = ["*"]
 
-        # Apply DISTINCT for distinct-only case
         self.query_parts['select'] = ['DISTINCT ' + ', '.join(select_items)] if is_distinct_only else select_items
 
     def _build_where_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig]):
-        """Build WHERE clause without table aliases."""
         if not params.filterBy:
             return
 
@@ -821,15 +727,14 @@ class SQLBuilder:
 
     def _build_filter_condition(self, filter_obj: FilterModel, column_to_table_map: Dict[str, TableConfig]) -> Tuple[
         str, List[Any]]:
-        """Build individual filter condition without table aliases."""
         column = filter_obj.field
         if '.' in column:
             table_name, col_name = column.split('.', 1)
             column = col_name
         elif column in column_to_table_map:
-            column = column  # Already the column name without prefix
+            column = column
 
-        operator = filter_obj.operator.upper()  # Already normalized by schemas.py
+        operator = filter_obj.operator.upper()
         values = filter_obj.values
 
         if operator == 'BETWEEN':
@@ -851,7 +756,6 @@ class SQLBuilder:
 
     def _build_group_by_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig],
                                join_tables: Dict[str, TableConfig], is_aggregated: bool):
-        """Build GROUP BY clause without table aliases."""
         if not is_aggregated:
             return
 
@@ -885,7 +789,6 @@ class SQLBuilder:
             self.query_parts['group_by'] = group_by_items
 
     def _build_order_by_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig]):
-        """Build ORDER BY clause without table aliases using normalized order."""
         if not params.sortBy:
             return
 
@@ -895,13 +798,12 @@ class SQLBuilder:
             if '.' in column:
                 table_name, col_name = column.split('.', 1)
                 column = col_name
-            order_items.append(f"{column} {sort_obj.order}")  # Uses normalized ASC/DESC
+            order_items.append(f"{column} {sort_obj.order}")
 
         if order_items:
             self.query_parts['order_by'] = f"ORDER BY {', '.join(order_items)}"
 
     def _build_pagination(self, params: GetDataParams):
-        """Build LIMIT and OFFSET clauses."""
         if params.page and params.page_size:
             limit = params.page_size
             offset = (params.page - 1) * params.page_size
@@ -910,7 +812,6 @@ class SQLBuilder:
                 self.query_parts['offset'] = str(offset)
 
     def _construct_final_query(self) -> str:
-        """Construct the final SQL query."""
         query_parts = []
 
         query_parts.append(f"SELECT {', '.join(self.query_parts['select'])}")

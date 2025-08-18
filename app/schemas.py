@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from typing import List, Optional, Any, Dict
 from enum import Enum
 
@@ -15,7 +15,8 @@ class MeasureModel(BaseModel):
     field: str
     function: str
 
-    @validator('function')
+    @field_validator('function')
+    @classmethod
     def valid_function(cls, v):
         valid_functions = {'count', 'sum', 'avg', 'min', 'max'}
         normalized = v.upper()
@@ -29,7 +30,8 @@ class FilterModel(BaseModel):
     operator: str
     values: Any
 
-    @validator('operator')
+    @field_validator('operator')
+    @classmethod
     def valid_operator(cls, v):
         valid_operators = {'equal', 'in', 'between', 'inlist'}
         normalized = v.upper()
@@ -37,9 +39,10 @@ class FilterModel(BaseModel):
             raise ValueError(f"Operator must be one of {valid_operators}")
         return normalized  # Normalize to uppercase: EQUAL, IN, BETWEEN, INLIST
 
-    @validator('values')
-    def validate_values(cls, v, values):
-        operator = values.get('operator', '').upper()
+    @field_validator('values')
+    @classmethod
+    def validate_values(cls, v, info):
+        operator = info.data.get('operator', '').upper()
         if operator == 'BETWEEN':
             if not isinstance(v, list) or len(v) != 2:
                 raise ValueError("BETWEEN requires a list of exactly 2 values")
@@ -56,7 +59,8 @@ class SortModel(BaseModel):
     field: str
     order: str = "ASC"
 
-    @validator('order')
+    @field_validator('order')
+    @classmethod
     def valid_order(cls, v):
         valid_orders = {'asc', 'desc'}
         normalized = v.upper()
@@ -73,27 +77,32 @@ class GetDataParams(BaseModel):
     page: Optional[int] = 1
     page_size: Optional[int] = 10
 
-    @validator('page')
+    @field_validator('page')
+    @classmethod
     def page_gte_one(cls, v):
         if v is None or v >= 1:
             return v
         raise ValueError("Page must be greater than or equal to 1")
 
-    @validator('page_size')
+    @field_validator('page_size')
+    @classmethod
     def page_size_gte_one(cls, v):
         if v is None or v >= 1:
             return v
         raise ValueError("Page size must be greater than or equal to 1")
 
-    @validator('measures')
+    @field_validator('measures')
+    @classmethod
     def measures_check(cls, v):
         return v or []
 
-    @validator('filterBy')
+    @field_validator('filterBy')
+    @classmethod
     def filterBy_check(cls, v):
         return v or []
 
-    @validator('sortBy')
+    @field_validator('sortBy')
+    @classmethod
     def sortBy_check(cls, v):
         return v or []
 
@@ -133,6 +142,7 @@ class QueryResponse(BaseModel):
     page_size: int
     total_count: int = 0
     query: str
+    query_id: str
 
 
 # Legacy support - FilterCondition for backward compatibility
@@ -141,7 +151,8 @@ class FilterCondition(BaseModel):
     operator: str
     values: Any
 
-    @validator('operator')
+    @field_validator('operator')
+    @classmethod
     def valid_operator(cls, v):
         valid_operators = {'equal', 'in', 'between'}
         normalized = v.upper()
@@ -149,9 +160,10 @@ class FilterCondition(BaseModel):
             raise ValueError(f"Operator must be one of {valid_operators}")
         return normalized
 
-    @validator('values')
-    def validate_values(cls, v, values):
-        operator = values.get('operator', '').upper()
+    @field_validator('values')
+    @classmethod
+    def validate_values(cls, v, info):
+        operator = info.data.get('operator', '').upper()
         if operator == 'BETWEEN':
             if not isinstance(v, list) or len(v) != 2:
                 raise ValueError("BETWEEN requires a list of exactly 2 values")
