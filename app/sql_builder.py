@@ -12,13 +12,14 @@ class ValidationError(Exception):
 
 class TableConfig:
     def __init__(self, name: str, priority: int, columns: List[Dict], relations: List[Dict] = None,
-                 mandatory_fields: List[str] = None, aggregations: List[Dict] = None):
+                 mandatory_fields: List[str] = None, aggregations: List[Dict] = None, restricted_attributes: List[str] = None):
         self.name = name
         self.priority = priority
         self.columns = columns or []
         self.relations = relations or []
         self.mandatory_fields = mandatory_fields or []
         self.aggregations = aggregations or []
+        self.restricted_attributes = restricted_attributes or []
 
 
 class JoinRelation:
@@ -68,9 +69,10 @@ class SQLBuilder:
                 relations = table_data.get('relations', [])
                 mandatory_fields = table_data.get('mandatory_fields', [])
                 aggregations = table_data.get('aggregation', [])
+                restricted_attributes = table_data.get('restricted_attributes', [])
 
                 if name:
-                    config = TableConfig(name, priority, columns, relations, mandatory_fields, aggregations)
+                    config = TableConfig(name, priority, columns, relations, mandatory_fields, aggregations, restricted_attributes)
                     self.table_configs[name] = config
 
     def _validate_columns(self, columns: List[str]) -> List[Dict]:
@@ -810,6 +812,49 @@ class SQLBuilder:
             self.query_parts['limit'] = str(limit)
             if offset > 0:
                 self.query_parts['offset'] = str(offset)
+
+    def build_distinct_values_query(self, columns: List[str]) -> List[Tuple[str, str, List[Any]]]:
+        queries = []
+        errors = self._validate_columns(columns)
+        if errors:
+            raise ValidationError(errors)
+
+        _, column_to_table_map = self._get_explicitly_requested_tables(GetDataParams(groupBy=columns))
+
+        for column in columns:
+            data_type = self._get_column_data_type(column, column_to_table_map)
+            if not data_type:
+                data_type = "UNKNOWN"
+
+            # Check if column is restricted
+            is_restricted = False
+            if '.' in column:
+                table_name, col_name = column.split('.', 1)
+                if table_name in self.table_configs and col_name in self.table_configs[
+                    table_name].restricted_attributes:
+                    is_restricted = True
+            else:
+                table_config = column_to_table_map.get(column)
+                if table_config and column in table_config.restricted_attributes:
+                    is_restricted = True
+
+            if is_restricted:
+                queries.append((column, data_type, None, []))
+                continue
+
+            # Build query for non-restricted columns
+            if '.' in column:
+                table_name, col_name = column.split('.', 1)
+                query = f"SELECT DISTINCT {col_name} FROM {table_name} WHERE {col_name} IS NOT NULL"
+            else:
+                table_config = column_to_table_map.get(column)
+                if not table_config:
+                    continue
+                query = f"SELECT DISTINCT {column} FROM {table_config.name} WHERE {column} IS NOT NULL"
+
+            queries.append((column, data_type, query, []))
+
+        return queries
 
     def _construct_final_query(self) -> str:
         query_parts = []

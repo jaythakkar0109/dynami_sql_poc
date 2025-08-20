@@ -175,9 +175,10 @@ class FilterCondition(BaseModel):
                 raise ValueError("EQUAL requires a single value")
         return v
 
+class AttributeResponse(BaseModel):
+    field: str
+    type: str
+    values: List[str]
 
-# Legacy support - AggregationModel for backward compatibility
-class AggregationModel(BaseModel):
-    function: AggregationEnum
-    column: str
-    alias: str
+class GetAttributesRequest(BaseModel):
+    columns: List[str]
