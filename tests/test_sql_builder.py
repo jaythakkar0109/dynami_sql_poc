@@ -4,29 +4,24 @@ from app.sql_builder import SQLBuilder, ValidationError
 from app.schemas import GetDataParams, MeasureModel, FilterModel, SortModel
 
 def test_yaml_fixture(sample_table_config_yaml):
-    print("YAML Content:", sample_table_config_yaml)  # Debug
     parsed_yaml = yaml.safe_load(sample_table_config_yaml)
-    print("Parsed YAML:", parsed_yaml)  # Debug
     assert parsed_yaml is not None
     assert "SCHEMAS" in parsed_yaml
     assert "newwpnl" in parsed_yaml["SCHEMAS"]
 
 def test_sql_builder_init(mock_yaml_load):
     builder = SQLBuilder()
-    print("table_configs:", builder.table_configs)  # Debug
     assert "newwpnl" in builder.table_configs, f"table_configs is empty: {builder.table_configs}"
     assert builder.table_configs["newwpnl"].priority == 1
     assert "uid" in builder.table_configs["newwpnl"].restricted_attributes
 
 def test_validate_columns_valid(mock_yaml_load):
     builder = SQLBuilder()
-    print("table_configs:", builder.table_configs)  # Debug
     errors = builder._validate_columns(["uidtype", "newpnl"])
     assert not errors, f"Unexpected errors: {errors}"
 
 def test_validate_columns_invalid(mock_yaml_load):
     builder = SQLBuilder()
-    print("table_configs:", builder.table_configs)  # Debug
     errors = builder._validate_columns(["col"])
     assert len(errors) == 1
     assert "Column 'col' not found in any table" in errors[0]["message"]
@@ -72,7 +67,6 @@ def test_build_distinct_values_query_restricted(mock_yaml_load):
 
 def test_build_distinct_values_query_valid(mock_yaml_load):
     builder = SQLBuilder()
-    print("table_configs:", builder.table_configs)  # Debug
     queries = builder.build_distinct_values_query(["uidtype"])
     assert len(queries) == 1
     assert queries[0][0] == "uidtype"
@@ -82,7 +76,6 @@ def test_build_distinct_values_query_valid(mock_yaml_load):
 
 def test_build_count_query_distinct(mock_yaml_load):
     builder = SQLBuilder(count_strategy="distinct")
-    print("table_configs:", builder.table_configs)  # Debug
     params = GetDataParams(groupBy=["uidtype"])
     main_query, main_params, count_query, count_params = builder.build_query(params)
     assert "SELECT DISTINCT uidtype" in main_query

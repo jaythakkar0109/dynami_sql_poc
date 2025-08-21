@@ -49,7 +49,6 @@ def sample_table_config_yaml():
 @pytest.fixture
 def mock_yaml_load(sample_table_config_yaml):
     parsed_yaml = yaml.safe_load(sample_table_config_yaml)
-    print("Setting up mock_yaml_load with parsed YAML:", parsed_yaml)  # Debug
     with patch("os.path.exists", return_value=True), \
          patch("builtins.open", mock_open(read_data=sample_table_config_yaml)), \
          patch("yaml.safe_load", return_value=parsed_yaml):
