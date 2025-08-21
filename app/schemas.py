@@ -182,3 +182,9 @@ class AttributeResponse(BaseModel):
 
 class GetAttributesRequest(BaseModel):
     columns: List[str]
+    filterBy: Optional[List[FilterModel]] = None
+
+class GetAttributesResponse(BaseModel):
+    query_id: str
+    query : str
+    data: List[AttributeResponse]
