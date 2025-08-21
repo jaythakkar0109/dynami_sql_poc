@@ -1,26 +1,24 @@
-import os
+# settings.py
 from pydantic_settings import BaseSettings
-from dotenv import load_dotenv
-
-load_dotenv()
+from pydantic import ConfigDict
 
 class Settings(BaseSettings):
     TITLE: str = "Dynamic SQL Query API - Trino Edition"
     DESCRIPTION: str = "A FastAPI service for executing dynamic SQL queries against Trino/Pinot"
     VERSION: str = "1.0.0"
 
-    # PostgreSQL configuration
-    POSTGRES_HOST: str = os.getenv('POSTGRES_HOST')
-    POSTGRES_PORT: int = int(os.getenv('POSTGRES_PORT', 5432))
-    POSTGRES_DATABASE: str = os.getenv('POSTGRES_DATABASE')
-    POSTGRES_USER: str = os.getenv('POSTGRES_USER')
-    POSTGRES_PASSWORD: str = os.getenv('POSTGRES_PASSWORD')
+    POSTGRES_HOST: str | None = None
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DATABASE: str | None = None
+    POSTGRES_USER: str | None = None
+    POSTGRES_PASSWORD: str | None = None
 
-    API_URL: str = os.getenv('API_URL')
-    API_PORT: str = os.getenv('API_PORT')
+    API_URL: str | None = None
+    API_PORT: str | None = None
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
 
 settings = Settings()
