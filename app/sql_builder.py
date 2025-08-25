@@ -62,8 +62,10 @@ class SQLBuilder:
                 name = table_data.get('schema_name')
                 priority = table_data.get('priority', 999)
                 columns = [
-                    {'name': field_name, 'field_aliases': field_data.get('field_aliases', []),
-                     'field_type': field_data.get('field_type')}
+                    {'name': field_name,
+                     'field_aliases': field_data.get('field_aliases', []),
+                     'field_type': field_data.get('field_type'),
+                     'supported_operators': field_data.get('supported_operators', [])}
                     for field_name, field_data in table_data.get('schema_fields', {}).items()
                 ]
                 relations = table_data.get('relations', [])
@@ -127,6 +129,21 @@ class SQLBuilder:
                 if col_def.get('name') == col_name or col_name in col_def.get('field_aliases', []):
                     return col_def.get('field_type')
         return None
+
+    def _get_supported_operators(self, column: str, column_to_table_map: Dict[str, TableConfig]) -> List[str]:
+        table_name = None
+        col_name = column
+
+        if col_name in column_to_table_map:
+            table_config = column_to_table_map[col_name]
+            table_name = table_config.name
+
+        if table_name and table_name in self.table_configs:
+            table_config = self.table_configs[table_name]
+            for col_def in table_config.columns:
+                if col_def.get('name') == col_name or col_name in col_def.get('field_aliases', []):
+                    return col_def.get('supported_operators', [])
+        return []
 
     def _validate_filter_data_types(self, filters: List[FilterModel], column_to_table_map: Dict[str, TableConfig]) -> \
             List[Dict]:
@@ -217,6 +234,9 @@ class SQLBuilder:
         errors = []
         valid_functions = {'SUM', 'COUNT', 'AVG', 'MAX', 'MIN'}
 
+        # Get column-to-table mapping for measures
+        _, column_to_table_map = self._get_explicitly_requested_tables(GetDataParams(measures=measures))
+
         for i, measure in enumerate(measures):
             if not isinstance(measure, MeasureModel):
                 errors.append({
@@ -232,10 +252,20 @@ class SQLBuilder:
                     for error in column_errors
                 ])
 
-            if measure.function.upper() not in valid_functions:
+            function = measure.function.upper()
+            if function not in valid_functions:
                 errors.append({
                     "field": "measures",
                     "message": f"Invalid aggregation function '{measure.function}' for field '{measure.field}' at index {i}. Valid functions: {', '.join(valid_functions)}"
+                })
+                continue
+
+            # Validate against supported_operators in table config
+            supported_operators = self._get_supported_operators(measure.field, column_to_table_map)
+            if supported_operators and function not in supported_operators:
+                errors.append({
+                    "field": "measures",
+                    "message": f"Aggregation function '{function}' is not supported for field '{measure.field}' at index {i}. Supported functions: {', '.join(supported_operators)}"
                 })
 
         return errors
