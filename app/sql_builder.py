@@ -1,14 +1,9 @@
 import os
 import yaml
-from typing import List, Any, Dict, Tuple, Union
-from app.schemas import GetDataParams, FilterModel, MeasureModel, SortModel
+from typing import List, Any, Dict, Tuple
 
-
-class ValidationError(Exception):
-    def __init__(self, errors: List[Dict]):
-        self.errors = errors
-        super().__init__("Validation failed")
-
+from app.exception import ValidationError
+from app.schemas import GetDataParams, FilterModel, MeasureModel
 
 class TableConfig:
     def __init__(self, name: str, priority: int, columns: List[Dict], relations: List[Dict] = None,
@@ -214,10 +209,10 @@ class SQLBuilder:
             elif operator == 'EQUAL':
                 if values is None:
                     continue
-                if not isinstance(values, (int, float, str, bool)):
+                if not isinstance(values, expected_python_types):
                     errors.append({
                         "field": "filters",
-                        "message": f"Invalid value for column '{column}' with EQUAL operator at index {i}: must be a single value",
+                        "message": f"Invalid data type for column '{column}' with EQUAL operator at index {i}: must be a single value",
                         "expected": expected_type,
                         "actual": type(values).__name__,
                         "value": str(values)

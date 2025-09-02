@@ -1,9 +1,75 @@
 from unittest.mock import patch, mock_open
 
 import pytest
-import yaml
 
 from app.schemas import GetDataParams, FilterModel, MeasureModel, SortModel
+
+# Mock YAML configuration for testing
+SAMPLE_YAML_CONFIG = """
+SCHEMAS:
+  newwpnl:
+    schema_name: "newwpnl"
+    priority: 1
+    mandatory_fields: ["uidtype", "businessdate"]
+    restricted_attributes: ["uid"]
+    aggregation:
+      - field: "newpnl"
+        function: "SUM"
+        alias: "total_newpnl"
+    schema_fields:
+      uid:
+        field_type: "INTEGER"
+        field_aliases: ["user_id"]
+        supported_operators: ["EQUAL", "IN"]
+      uidtype:
+        field_type: "VARCHAR"
+        field_aliases: ["user_type"]
+        supported_operators: ["EQUAL", "IN"]
+      businessdate:
+        field_type: "INTEGER"
+        field_aliases: ["bdate", "date"]
+        supported_operators: ["EQUAL", "BETWEEN", "IN"]
+      newpnl:
+        field_type: "DOUBLE PRECISION"
+        field_aliases: ["profit_loss", "pnl"]
+        supported_operators: ["SUM", "AVG", "COUNT"]
+    relations:
+      - name: "users"
+        type: "LEFT"
+        joinColumns:
+          - source: "uid"
+            target: "id"
+  users:
+    schema_name: "users"
+    priority: 2
+    mandatory_fields: ["id"]
+    schema_fields:
+      id:
+        field_type: "INTEGER"
+        field_aliases: []
+        supported_operators: ["EQUAL", "IN"]
+      name:
+        field_type: "VARCHAR"
+        field_aliases: ["username"]
+        supported_operators: ["EQUAL", "IN"]
+    relations:
+      - name: "profile"
+        type: "LEFT"
+        joinColumns:
+          - name: "id"
+  profile:
+    schema_name: "profile"
+    priority: 3
+    schema_fields:
+      id:
+        field_type: "INTEGER"
+        field_aliases: []
+        supported_operators: ["EQUAL", "IN"]
+      email:
+        field_type: "VARCHAR"
+        field_aliases: []
+        supported_operators: ["EQUAL", "IN"]
+"""
 
 @pytest.fixture
 def sample_get_data_params():
@@ -17,42 +83,14 @@ def sample_get_data_params():
     )
 
 @pytest.fixture
-def sample_table_config_yaml():
-    return """
-    SCHEMAS:
-      newwpnl:
-        schema_name: newwpnl
-        schema_fields:
-          uidtype:
-            field_aliases: [ uidtype ]
-            field_type: VARCHAR
-          businessdate:
-            field_aliases: [ businessdate ]
-            field_type: INTEGER
-          newpnl:
-            field_aliases: [ newpnl ]
-            field_type: DOUBLE PRECISION
-          uid:
-            field_aliases: [ uid ]
-            field_type: VARCHAR
-        priority: 1
-        mandatory_fields: [uidtype, businessdate]
-        aggregation:
-          - field: newpnl
-            function: SUM
-            alias: total_newpnl
-        relations: []
-        restricted_attributes: [uid]
-    """
-
+def mock_yaml_load():
+    with patch('builtins.open', mock_open(read_data=SAMPLE_YAML_CONFIG)), \
+            patch('os.path.exists', return_value=True):
+        yield
 
 @pytest.fixture
-def mock_yaml_load(sample_table_config_yaml):
-    parsed_yaml = yaml.safe_load(sample_table_config_yaml)
-    with patch("os.path.exists", return_value=True), \
-         patch("builtins.open", mock_open(read_data=sample_table_config_yaml)), \
-         patch("yaml.safe_load", return_value=parsed_yaml):
-        yield
+def sample_table_config_yaml():
+    return SAMPLE_YAML_CONFIG
 
 @pytest.fixture
 def mock_env(monkeypatch):
