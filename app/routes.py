@@ -70,7 +70,7 @@ async def get_attributes(params: GetAttributesRequest):
                 if params.filterBy:
                     where_conditions = []
                     for filter_obj in params.filterBy:
-                        condition, filter_values = sql_builder._build_filter_condition(filter_obj, column_to_table_map)
+                        condition, filter_values = sql_builder._build_filter_condition(filter_obj)
                         if condition:
                             where_conditions.append(condition)
                             final_params.extend(filter_values)

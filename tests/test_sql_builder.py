@@ -727,25 +727,22 @@ def test_build_query_mandatory_fields_in_group_by(mock_yaml_load):
 def test_build_filter_condition_null_values(mock_yaml_load):
     builder = SQLBuilder()
     params = GetDataParams(groupBy=["uidtype"])
-    _, column_to_table_map = builder._get_explicitly_requested_tables(params)
 
     filter_obj = FilterModel(field="businessdate", operator="BETWEEN", values=[None, 20230201])
-    condition, params_list = builder._build_filter_condition(filter_obj, column_to_table_map)
+    condition, params_list = builder._build_filter_condition(filter_obj)
     assert condition == "businessdate BETWEEN ? AND ?"
     assert params_list == [None, 20230201]
 
 
 def test_build_filter_condition_invalid_operator(mock_yaml_load):
     builder = SQLBuilder()
-    params = GetDataParams(groupBy=["uidtype"])
-    _, column_to_table_map = builder._get_explicitly_requested_tables(params)
 
     filter_obj = Mock(spec=['field', 'operator', 'values'])
     filter_obj.field = "businessdate"
     filter_obj.operator = "INVALID"
     filter_obj.values = 123
 
-    condition, params_list = builder._build_filter_condition(filter_obj, column_to_table_map)
+    condition, params_list = builder._build_filter_condition(filter_obj)
     assert condition is None
     assert params_list == []
 

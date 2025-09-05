@@ -320,7 +320,7 @@ class SQLBuilder:
         self._build_select_clause(params, column_to_table_map, join_tables, is_aggregated)
         self._build_from_clause(main_table)
         self._build_join_clauses(main_table, join_tables)
-        self._build_where_clause(params, column_to_table_map)
+        self._build_where_clause(params)
         self._build_group_by_clause(params, column_to_table_map, join_tables, is_aggregated)
         self._build_order_by_clause(params, column_to_table_map)
         self._build_pagination(params)
@@ -328,18 +328,18 @@ class SQLBuilder:
         main_query = self._construct_final_query()
         main_parameters = self.parameters.copy()
 
-        count_query, count_parameters = self._build_count_query(main_table, join_tables, column_to_table_map, params)
+        count_query, count_parameters = self._build_count_query(main_table, join_tables, params)
 
         return main_query, main_parameters, count_query, count_parameters
 
     def _build_count_query(self, main_table: TableConfig, join_tables: Dict[str, TableConfig],
-                              column_to_table_map: Dict[str, TableConfig], params: GetDataParams) -> Tuple[
+                            params: GetDataParams) -> Tuple[
         str, List[Any]]:
         count_parameters = []
 
         if params.filterBy:
             for filter_obj in params.filterBy:
-                _, params_values = self._build_filter_condition(filter_obj, column_to_table_map)
+                _, params_values = self._build_filter_condition(filter_obj)
                 count_parameters.extend(params_values)
 
         is_distinct_only = params.is_distinct_only()
@@ -738,13 +738,13 @@ class SQLBuilder:
 
         self.query_parts['select'] = ['DISTINCT ' + ', '.join(select_items)] if is_distinct_only else select_items
 
-    def _build_where_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig]):
+    def _build_where_clause(self, params: GetDataParams):
         if not params.filterBy:
             return
 
         conditions = []
         for filter_obj in params.filterBy:
-            condition, params_values = self._build_filter_condition(filter_obj, column_to_table_map)
+            condition, params_values = self._build_filter_condition(filter_obj)
             if condition:
                 conditions.append(condition)
                 self.parameters.extend(params_values)
@@ -752,14 +752,12 @@ class SQLBuilder:
         if conditions:
             self.query_parts['where'] = [f"({' AND '.join(conditions)})"]
 
-    def _build_filter_condition(self, filter_obj: FilterModel, column_to_table_map: Dict[str, TableConfig]) -> Tuple[
+    def _build_filter_condition(self, filter_obj: FilterModel) -> Tuple[
         str, List[Any]]:
         column = filter_obj.field
         if '.' in column:
             table_name, col_name = column.split('.', 1)
             column = col_name
-        elif column in column_to_table_map:
-            column = column
 
         operator = filter_obj.operator.upper()
         values = filter_obj.values
