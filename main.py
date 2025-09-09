@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.logger import init_logger
 from app.routes import router
 from app.settings import settings
 
@@ -8,7 +10,8 @@ app = FastAPI(
     description=settings.DESCRIPTION,
     version=settings.VERSION
 )
-
+# Initialize logger
+init_logger(app)
 # Configure middleware
 app.add_middleware(
     CORSMiddleware,
