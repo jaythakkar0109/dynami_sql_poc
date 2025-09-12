@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     API_URL: str | None = None
     API_PORT: str | None = None
 
+    EUREKA_SERVER_URL: str
+    SERVICE_NAME: str
+    SERVICE_HOST: str
+    API_PROTOCOL: str
+    SERVICE_PORT: int
+
     model_config = ConfigDict(
         env_file=".env",
         env_file_encoding="utf-8"

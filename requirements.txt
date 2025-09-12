@@ -7,3 +7,5 @@ PyYAML==6.0.2
 json-logging==1.3.0
 python-dotenv
 pydantic-settings
+py-eureka-client
+# docker run -d --name eureka-server -p 8761:8761 steeltoeoss/eureka-server
