@@ -175,11 +175,6 @@ class FilterCondition(BaseModel):
                 raise ValueError("EQUAL requires a single value")
         return v
 
-class AttributeResponse(BaseModel):
-    field: str
-    type: str
-    values: List[str]
-
 class GetAttributesRequest(BaseModel):
     columns: List[str]
     filterBy: Optional[List[FilterModel]] = None
@@ -187,4 +182,4 @@ class GetAttributesRequest(BaseModel):
 class GetAttributesResponse(BaseModel):
     query_id: str
     query : str
-    data: List[AttributeResponse]
+    data: List[Any]

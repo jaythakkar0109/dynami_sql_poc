@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, status, Request
-from app.schemas import GetDataParams, QueryResponse, AttributeResponse, GetAttributesRequest, GetAttributesResponse
+from app.schemas import GetDataParams, QueryResponse, GetAttributesRequest, GetAttributesResponse
 from app.sql_builder import SQLBuilder, ValidationError
 from app.database import execute_query
 from app.utils import get_correlation_id_and_soeid, gen_props, gen_headers
@@ -76,7 +76,6 @@ async def execute_dynamic_query(params: GetDataParams, request: Request):
             detail={"query_id": query_id, "errors": [{"message": f"Internal server error: {str(e)}"}]}
         )
 
-
 @router.post("/rates/risk/get-attributes", response_model=GetAttributesResponse)
 async def get_attributes(params: GetAttributesRequest, request: Request):
     headers = gen_headers(request,endpoint=str(request.url))
@@ -102,41 +101,20 @@ async def get_attributes(params: GetAttributesRequest, request: Request):
         if all_errors:
             raise ValidationError(all_errors)
 
-        # Get queries for distinct values
-        queries = sql_builder.build_distinct_values_query(params.columns)
+        # Use build_query to get distinct combinations
+        query_params = GetDataParams(
+            groupBy=params.columns,
+            filterBy=params.filterBy or [],
+            page=1,
+            page_size=1000  # Reasonable default for distinct combinations
+        )
+        main_query, main_params, count_query, count_params = sql_builder.build_query(query_params)
 
-        response_data = []
-        query_strings = []
+        # Get column data types
+        _, column_to_table_map = sql_builder._get_explicitly_requested_tables(query_params)
 
-        for column, data_type, query, query_params in queries:
-            values = []
-            final_params = query_params.copy()
-            final_query = query
-
-            if query:
-                if params.filterBy:
-                    where_conditions = []
-                    for filter_obj in params.filterBy:
-                        condition, filter_values = sql_builder._build_filter_condition(filter_obj)
-                        if condition:
-                            where_conditions.append(condition)
-                            final_params.extend(filter_values)
-                    if where_conditions:
-                        final_query = f"{query} AND {' AND '.join(where_conditions)}"
-
-                results = execute_query(final_query, final_params)
-                values = [str(row[column.split('.')[-1]]) for row in results if row[column.split('.')[-1]] is not None]
-
-            query_strings.append(final_query if final_query else f"-- Restricted column: {column}")
-
-            response_data.append(AttributeResponse(
-                field=column,
-                type=data_type,
-                values=values
-            ))
-
-        # Combine all queries for response
-        final_query_string = "; ".join([q for q in query_strings if q])
+        # Execute query for distinct combinations
+        results = execute_query(main_query, main_params)
 
         execution_time = time.perf_counter() - start_time
 
@@ -144,12 +122,12 @@ async def get_attributes(params: GetAttributesRequest, request: Request):
                     extra=gen_props(headers,
                                     query_id=query_id,
                                     execution_time=execution_time,
-                                    attributes_count=len(response_data)))
+                                    attributes_count=len(results)))
 
         return GetAttributesResponse(
             query_id=query_id,
-            data=response_data,
-            query=final_query_string
+            data=results,
+            query=main_query
         )
 
     except ValidationError as e:
