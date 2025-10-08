@@ -135,6 +135,9 @@ class GetDataParams(BaseModel):
 
         return list(set(columns))  # Remove duplicates
 
+class ColumnMetadata(BaseModel):
+    field: str
+    type: str
 
 class QueryResponse(BaseModel):
     data: List[Any]
@@ -143,6 +146,7 @@ class QueryResponse(BaseModel):
     total_count: int = 0
     query: str
     query_id: str
+    columns: Optional[List[ColumnMetadata]] = None
 
 
 # Legacy support - FilterCondition for backward compatibility
@@ -183,12 +187,3 @@ class GetAttributesResponse(BaseModel):
     query_id: str
     query : str
     data: List[Any]
-
-class ColumnMetadata(BaseModel):
-    field: str
-    type: str
-
-class AttributeResponse(BaseModel):
-    field: str
-    type: str
-    values: List[str]
