@@ -135,9 +135,21 @@ async def get_attributes(params: GetAttributesRequest, request: Request):
                                     execution_time=execution_time,
                                     attributes_count=len(results)))
 
+        column_metadata = [
+            ColumnMetadata(
+                field=col,
+                type=sql_builder._get_column_data_type(col, column_to_table_map) or "UNKNOWN"
+            ) for col in params.columns
+        ]
+        column_metadata_dicts = [
+            {"field": col.field, "type": col.type}
+            for col in column_metadata
+        ]
+        response_data = {"fields":column_metadata_dicts,"values":results}
+
         return GetAttributesResponse(
             query_id=query_id,
-            data=results,
+            data=response_data,
             query=main_query
         )
 

@@ -186,4 +186,4 @@ class GetAttributesRequest(BaseModel):
 class GetAttributesResponse(BaseModel):
     query_id: str
     query : str
-    data: List[Any]
+    data: dict
