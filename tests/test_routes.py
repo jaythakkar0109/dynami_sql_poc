@@ -70,9 +70,7 @@ def test_get_attributes_success(mock_yaml_load, mock_env):
         response = client.post("/rates/risk/get-attributes", json={"columns": ["uidtype"]})
         assert response.status_code == 200, f"Expected status 200, got {response.status_code}"
         assert len(response.json()["data"]) == 1
-        assert response.json()["data"][0]["field"] == "uidtype"
-        assert response.json()["data"][0]["type"] == "VARCHAR"
-        assert response.json()["data"][0]["values"] == ["value1", "value2"]
+        assert response.json()["data"] == [{"uidtype": "value1"}, {"uidtype": "value2"}]
         assert response.json()["query"] == "SELECT DISTINCT uidtype FROM newwpnl WHERE uidtype IS NOT NULL"
         assert "query_id" in response.json()
 

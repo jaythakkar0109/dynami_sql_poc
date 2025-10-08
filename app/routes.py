@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status, Request
-from app.schemas import GetDataParams, QueryResponse, GetAttributesRequest, GetAttributesResponse
+from app.schemas import GetDataParams, QueryResponse, GetAttributesRequest, GetAttributesResponse, ColumnMetadata, \
+    AttributeResponse
 from app.sql_builder import SQLBuilder, ValidationError
 from app.database import execute_query
 from app.utils import get_correlation_id_and_soeid, gen_props, gen_headers
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 @router.post("/rates/risk/get-data", response_model=QueryResponse)
 async def execute_dynamic_query(params: GetDataParams, request: Request):
-    headers = gen_headers(request,endpoint=str(request.url))
+    headers = gen_headers(request, endpoint=str(request.url))
     start_time = time.perf_counter()
     query_id = headers.get("correlation-id")
 
@@ -25,6 +26,36 @@ async def execute_dynamic_query(params: GetDataParams, request: Request):
                                     params=params.dict()))
 
         sql_builder = SQLBuilder()
+
+        # Handle case where only groupBy is provided (no measures)
+        if params.groupBy and not params.measures and not params.filterBy and not params.sortBy:
+            _, column_to_table_map = sql_builder._get_explicitly_requested_tables(params)
+            response_data = [
+                AttributeResponse(
+                    field=col,
+                    type=sql_builder._get_column_data_type(col, column_to_table_map) or "UNKNOWN",
+                    values=[]  # Empty list as no values are needed
+                ) for col in params.groupBy
+            ]
+
+            execution_time = time.perf_counter() - start_time
+
+            logger.info(f"Column metadata retrieved for query_id: {query_id}",
+                        extra=gen_props(headers,
+                                        query_id=query_id,
+                                        execution_time=execution_time,
+                                        result_count=len(response_data)))
+
+            return QueryResponse(
+                query_id=query_id,
+                data=response_data,
+                page=params.page,
+                page_size=params.page_size,
+                total_count=len(response_data),
+                query=""
+            )
+
+        # Original logic for other cases
         main_query, main_params, count_query, count_params = sql_builder.build_query(params)
 
         total_count = 0
@@ -75,7 +106,6 @@ async def execute_dynamic_query(params: GetDataParams, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"query_id": query_id, "errors": [{"message": f"Internal server error: {str(e)}"}]}
         )
-
 @router.post("/rates/risk/get-attributes", response_model=GetAttributesResponse)
 async def get_attributes(params: GetAttributesRequest, request: Request):
     headers = gen_headers(request,endpoint=str(request.url))

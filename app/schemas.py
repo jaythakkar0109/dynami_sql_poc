@@ -112,7 +112,7 @@ class GetDataParams(BaseModel):
 
     def is_distinct_only(self) -> bool:
         """Check if the request is for distinct groupBy values only"""
-        return bool(self.groupBy) and not self.measures and not self.filterBy and not self.sortBy
+        return bool(self.groupBy) and not self.measures
 
     def get_all_columns(self) -> List[str]:
         """Get all columns referenced in the request"""
@@ -137,7 +137,7 @@ class GetDataParams(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    data: List[Dict[str, Any]]
+    data: List[Any]
     page: int
     page_size: int
     total_count: int = 0
@@ -183,3 +183,12 @@ class GetAttributesResponse(BaseModel):
     query_id: str
     query : str
     data: List[Any]
+
+class ColumnMetadata(BaseModel):
+    field: str
+    type: str
+
+class AttributeResponse(BaseModel):
+    field: str
+    type: str
+    values: List[str]
