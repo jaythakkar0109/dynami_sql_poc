@@ -1,5 +1,5 @@
 import fastapi.testclient
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import uuid
 
 from app.exception import ValidationError
@@ -81,9 +81,15 @@ def test_get_attributes_success(mock_yaml_load, mock_env):
         mock_builder_instance = mock_builder.return_value
         mock_builder_instance._validate_columns.return_value = []  # No column validation errors
         mock_builder_instance._validate_filter_data_types.return_value = []  # No filter validation errors
+
+        # Create a mock table config object with restricted_attributes
+        mock_table_config = MagicMock()
+        mock_table_config.restricted_attributes = []  # Empty list for no restricted columns
+
+        # Mock _get_explicitly_requested_tables to return table config object
         mock_builder_instance._get_explicitly_requested_tables.return_value = (
             ["newwpnl"],  # Tables
-            {"uidtype": "newwpnl"}  # Column-to-table mapping
+            {"uidtype": mock_table_config}  # Column-to-table mapping with mock object
         )
         mock_builder_instance._get_column_data_type.return_value = "VARCHAR"
         mock_builder_instance.build_query.return_value = (
