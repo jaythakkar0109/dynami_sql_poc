@@ -116,13 +116,23 @@ async def get_attributes(params: GetAttributesRequest, request: Request):
         query_params = GetDataParams(
             groupBy=params.columns,
             filterBy=params.filterBy or [],
-            page=1,
-            page_size=1000  # Reasonable default for distinct combinations
         )
-        main_query, main_params, count_query, count_params = sql_builder.build_query(query_params)
-
-        # Get column data types
         _, column_to_table_map = sql_builder._get_explicitly_requested_tables(query_params)
+
+        # Check for restricted columns and filter them out
+        is_restricted = False
+        restricted_columns = []
+        for column in params.columns:
+            table_config = column_to_table_map.get(column)
+            if table_config and column in table_config.restricted_attributes:
+                is_restricted = True
+                restricted_columns.append(column)
+
+        # Remove restricted columns from groupBy
+        if is_restricted:
+            query_params.groupBy = [col for col in query_params.groupBy if col not in restricted_columns]
+
+        main_query, main_params, count_query, count_params = sql_builder.build_query(query_params)
 
         # Execute query for distinct combinations
         results = execute_query(main_query, main_params)
