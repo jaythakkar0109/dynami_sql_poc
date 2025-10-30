@@ -298,6 +298,18 @@ class SQLBuilder:
         if column_errors:
             all_errors.extend(column_errors)
 
+        # 2. NEW: Validate mandatory filters
+        used_tables, _ = self._get_explicitly_requested_tables(params)
+        filtered_fields = {f.field for f in (params.filterBy or [])}
+
+        for table_name, config in used_tables.items():
+            for mand_field in config.mandatory_fields:
+                if mand_field not in filtered_fields:
+                    all_errors.append({
+                        "field": "filterBy",
+                        "message": f"Table '{table_name}' requires a filter on column '{mand_field}'"
+                    })
+
         if params.filterBy:
             set_a_tables, column_to_table_map = self._get_explicitly_requested_tables(params)
             filter_errors = self._validate_filter_data_types(params.filterBy, column_to_table_map)
