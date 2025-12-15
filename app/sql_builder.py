@@ -375,18 +375,25 @@ class SQLBuilder:
 
         return reverse_relations
 
-    def build_query(self, params: GetDataParams) -> Tuple[str, List[Any], str, List[Any]]:
-        all_errors = []
+    def _collect_build_query_errors(self, params: GetDataParams) -> List[Dict]:
+        """
+        Collect all validation errors for a given request.
+        This keeps build_query readable without changing behaviour.
+        """
+        all_errors: List[Dict] = []
 
+        # 1) Validate that all referenced columns exist
         all_columns = params.get_all_columns()
         column_errors = self._validate_columns(all_columns)
         if column_errors:
             all_errors.extend(column_errors)
 
-        # 2. NEW: Validate mandatory filters
+        # 2) Validate mandatory filters
         used_tables, column_to_table_map = self._get_explicitly_requested_tables(params)
+
         # Resolve all filter fields to actual field names for comparison
         filtered_fields = {self._resolve_field_name(f.field, column_to_table_map) for f in (params.filterBy or [])}
+
         # Also check if any aliases match mandatory fields
         for f in (params.filterBy or []):
             resolved = self._resolve_field_name(f.field, column_to_table_map)
@@ -400,6 +407,7 @@ class SQLBuilder:
             for mand_field in config.mandatory_fields:
                 # Check both the actual field name and if any alias matches (case-insensitive)
                 field_found = False
+
                 # Case-insensitive check in filtered_fields
                 if any(f.lower() == mand_field.lower() for f in filtered_fields):
                     field_found = True
@@ -410,37 +418,45 @@ class SQLBuilder:
                             actual_name = col_def.get('name')
                             aliases = col_def.get('field_aliases', [])
                             # Check if mandatory field matches this column definition (case-insensitive)
-                            if (mand_field.lower() == actual_name.lower() or 
-                                any(mand_field.lower() == alias.lower() for alias in aliases)):
+                            if (mand_field.lower() == actual_name.lower() or
+                                    any(mand_field.lower() == alias.lower() for alias in aliases)):
                                 # Check if any filtered field matches (case-insensitive)
                                 for filtered_field in filtered_fields:
-                                    if (filtered_field.lower() == actual_name.lower() or 
-                                        any(filtered_field.lower() == alias.lower() for alias in aliases)):
+                                    if (filtered_field.lower() == actual_name.lower() or
+                                            any(filtered_field.lower() == alias.lower() for alias in aliases)):
                                         field_found = True
                                         break
                                 if field_found:
                                     break
                         if field_found:
                             break
-                
+
                 if not field_found:
                     all_errors.append({
                         "field": "filterBy",
                         "message": f"Table '{table_name}' requires a filter on column '{mand_field}'"
                     })
 
+        # 3) Validate filter data types
         if params.filterBy:
-            set_a_tables, column_to_table_map = self._get_explicitly_requested_tables(params)
+            _, column_to_table_map = self._get_explicitly_requested_tables(params)
             filter_errors = self._validate_filter_data_types(params.filterBy, column_to_table_map)
             all_errors.extend(filter_errors)
 
+        # 4) Validate measures
         if params.measures:
             measure_errors = self._validate_measures(params.measures)
             all_errors.extend(measure_errors)
 
+        return all_errors
+
+    def build_query(self, params: GetDataParams) -> Tuple[str, List[Any], str, List[Any]]:
+        # Run all validations first
+        all_errors = self._collect_build_query_errors(params)
         if all_errors:
             raise ValidationError(all_errors)
 
+        # Then build the query parts
         self._reset()
 
         set_a_tables, column_to_table_map = self._get_explicitly_requested_tables(params)
