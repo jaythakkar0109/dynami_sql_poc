@@ -72,6 +72,98 @@ class SQLBuilder:
                     config = TableConfig(name, priority, columns, relations, mandatory_fields, aggregations, restricted_attributes)
                     self.table_configs[name] = config
 
+    def _matches_field_name(self, input_name: str, actual_name: str, aliases: List[str]) -> bool:
+        """
+        Check if input_name matches actual_name or any alias (case-insensitive).
+        
+        Args:
+            input_name: The name to check
+            actual_name: The actual field name from config
+            aliases: List of aliases for the field
+            
+        Returns:
+            True if input_name matches actual_name or any alias (case-insensitive)
+        """
+        if input_name.lower() == actual_name.lower():
+            return True
+        return any(input_name.lower() == alias.lower() for alias in aliases)
+
+    def _resolve_table_column_format(self, table_name: str, col_name: str) -> str:
+        """
+        Resolve a field name in table.column format to actual field name.
+        
+        Args:
+            table_name: The table name
+            col_name: The column name (could be alias or case-variant)
+            
+        Returns:
+            The resolved field name in table.column format, or original if not found
+        """
+        if table_name not in self.table_configs:
+            return f"{table_name}.{col_name}"
+        
+        table_config = self.table_configs[table_name]
+        for col_def in table_config.columns:
+            actual_name = col_def.get('name')
+            aliases = col_def.get('field_aliases', [])
+            
+            if self._matches_field_name(col_name, actual_name, aliases):
+                return f"{table_name}.{actual_name}"
+        
+        return f"{table_name}.{col_name}"
+
+    def _resolve_column_from_table_config(self, field_name: str, table_config: TableConfig) -> str:
+        """
+        Resolve a field name by searching in a specific table config.
+        
+        Args:
+            field_name: The field name to resolve
+            table_config: The table config to search in
+            
+        Returns:
+            The actual field name if found, None otherwise
+        """
+        for col_def in table_config.columns:
+            actual_name = col_def.get('name')
+            aliases = col_def.get('field_aliases', [])
+            
+            if self._matches_field_name(field_name, actual_name, aliases):
+                return actual_name
+        return None
+
+    def _resolve_column_format(self, field_name: str, column_to_table_map: Dict[str, TableConfig] = None) -> str:
+        """
+        Resolve a field name in column-only format to actual field name.
+        
+        Args:
+            field_name: The field name to resolve
+            column_to_table_map: Optional mapping of columns to table configs
+            
+        Returns:
+            The actual field name if found, original field_name otherwise
+        """
+        # First try to find using column_to_table_map if provided
+        if column_to_table_map:
+            for key, table_config in column_to_table_map.items():
+                if key.lower() == field_name.lower():
+                    table_name = table_config.name
+                    
+                    if table_name in self.table_configs:
+                        resolved = self._resolve_column_from_table_config(
+                            field_name, self.table_configs[table_name]
+                        )
+                        if resolved:
+                            return resolved
+        
+        # If column_to_table_map not provided or not found, search all tables
+        for table_config in self.table_configs.values():
+            resolved = self._resolve_column_from_table_config(field_name, table_config)
+            if resolved:
+                return resolved
+        
+        # If not found, return as is (might be a column not in config)
+        return field_name
+
     def _resolve_field_name(self, field_name: str, column_to_table_map: Dict[str, TableConfig] = None) -> str:
         """
         Resolve a field name (which could be an alias or case-variant) to the actual field name.
@@ -86,55 +178,10 @@ class SQLBuilder:
             The actual field name (with correct case from config), in the same format as input
         """
         if '.' in field_name:
-            # Handle table.column format
             table_name, col_name = field_name.split('.', 1)
-            
-            if table_name in self.table_configs:
-                table_config = self.table_configs[table_name]
-                # Check if col_name matches an alias or field name (case-insensitive)
-                for col_def in table_config.columns:
-                    actual_name = col_def.get('name')
-                    aliases = col_def.get('field_aliases', [])
-                    
-                    # Case-insensitive comparison: check if col_name matches actual name or any alias
-                    if (col_name.lower() == actual_name.lower() or 
-                        any(col_name.lower() == alias.lower() for alias in aliases)):
-                        # Return table.actual_name (with correct case from config)
-                        return f"{table_name}.{actual_name}"
-            return field_name
+            return self._resolve_table_column_format(table_name, col_name)
         else:
-            # Handle just column format
-            # First try to find using column_to_table_map if provided
-            if column_to_table_map:
-                # Check both original field_name and case-insensitive matches
-                for key, table_config in column_to_table_map.items():
-                    if key.lower() == field_name.lower():
-                        table_name = table_config.name
-                        
-                        if table_name in self.table_configs:
-                            table_config = self.table_configs[table_name]
-                            for col_def in table_config.columns:
-                                actual_name = col_def.get('name')
-                                aliases = col_def.get('field_aliases', [])
-                                
-                                # Case-insensitive comparison
-                                if (field_name.lower() == actual_name.lower() or 
-                                    any(field_name.lower() == alias.lower() for alias in aliases)):
-                                    return actual_name
-            
-            # If column_to_table_map not provided or not found, search all tables
-            for table_config in self.table_configs.values():
-                for col_def in table_config.columns:
-                    actual_name = col_def.get('name')
-                    aliases = col_def.get('field_aliases', [])
-                    
-                    # Case-insensitive comparison: check if field_name matches actual name or any alias
-                    if (field_name.lower() == actual_name.lower() or 
-                        any(field_name.lower() == alias.lower() for alias in aliases)):
-                        return actual_name
-            
-            # If not found, return as is (might be a column not in config)
-            return field_name
+            return self._resolve_column_format(field_name, column_to_table_map)
 
     def _validate_columns(self, columns: List[str]) -> List[Dict]:
         errors = []
