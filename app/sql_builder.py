@@ -1,6 +1,6 @@
 import os
 import yaml
-from typing import List, Any, Dict, Tuple
+from typing import List, Any, Dict, Tuple, Optional
 
 from app.exception import ValidationError
 from app.schemas import GetDataParams, FilterModel, MeasureModel
@@ -112,7 +112,7 @@ class SQLBuilder:
         
         return f"{table_name}.{col_name}"
 
-    def _resolve_column_from_table_config(self, field_name: str, table_config: TableConfig) -> str:
+    def _resolve_column_from_table_config(self, field_name: str, table_config: TableConfig) -> Optional[str]:
         """
         Resolve a field name by searching in a specific table config.
         
@@ -131,6 +131,49 @@ class SQLBuilder:
                 return actual_name
         return None
 
+    def _resolve_from_column_to_table_map(self, field_name: str, column_to_table_map: Dict[str, TableConfig]) -> Optional[str]:
+        """
+        Try to resolve field name using column_to_table_map.
+        
+        Args:
+            field_name: The field name to resolve
+            column_to_table_map: Mapping of columns to table configs
+            
+        Returns:
+            The actual field name if found, None otherwise
+        """
+        for key, table_config in column_to_table_map.items():
+            if key.lower() != field_name.lower():
+                continue
+                
+            table_name = table_config.name
+            if table_name not in self.table_configs:
+                continue
+                
+            resolved = self._resolve_column_from_table_config(
+                field_name, self.table_configs[table_name]
+            )
+            if resolved:
+                return resolved
+        
+        return None
+
+    def _resolve_from_all_tables(self, field_name: str) -> Optional[str]:
+        """
+        Search all table configs to resolve field name.
+        
+        Args:
+            field_name: The field name to resolve
+            
+        Returns:
+            The actual field name if found, None otherwise
+        """
+        for table_config in self.table_configs.values():
+            resolved = self._resolve_column_from_table_config(field_name, table_config)
+            if resolved:
+                return resolved
+        return None
+
     def _resolve_column_format(self, field_name: str, column_to_table_map: Dict[str, TableConfig] = None) -> str:
         """
         Resolve a field name in column-only format to actual field name.
@@ -144,22 +187,14 @@ class SQLBuilder:
         """
         # First try to find using column_to_table_map if provided
         if column_to_table_map:
-            for key, table_config in column_to_table_map.items():
-                if key.lower() == field_name.lower():
-                    table_name = table_config.name
-                    
-                    if table_name in self.table_configs:
-                        resolved = self._resolve_column_from_table_config(
-                            field_name, self.table_configs[table_name]
-                        )
-                        if resolved:
-                            return resolved
-        
-        # If column_to_table_map not provided or not found, search all tables
-        for table_config in self.table_configs.values():
-            resolved = self._resolve_column_from_table_config(field_name, table_config)
+            resolved = self._resolve_from_column_to_table_map(field_name, column_to_table_map)
             if resolved:
                 return resolved
+        
+        # If column_to_table_map not provided or not found, search all tables
+        resolved = self._resolve_from_all_tables(field_name)
+        if resolved:
+            return resolved
         
         # If not found, return as is (might be a column not in config)
         return field_name
@@ -183,47 +218,84 @@ class SQLBuilder:
         else:
             return self._resolve_column_format(field_name, column_to_table_map)
 
+    def _column_exists_in_table_config(self, col_name: str, table_config: TableConfig) -> bool:
+        """
+        Check if a column exists in a table config (case-insensitive).
+        
+        Args:
+            col_name: The column name to check
+            table_config: The table config to search in
+            
+        Returns:
+            True if column exists, False otherwise
+        """
+        for col_def in table_config.columns:
+            actual_name = col_def.get('name')
+            aliases = col_def.get('field_aliases', [])
+            if self._matches_field_name(col_name, actual_name, aliases):
+                return True
+        return False
+
+    def _validate_table_column_format(self, column: str, table_name: str, col_name: str) -> Optional[Dict]:
+        """
+        Validate a column in table.column format.
+        
+        Args:
+            column: The full column string (for error message)
+            table_name: The table name
+            col_name: The column name
+            
+        Returns:
+            Error dict if validation fails, None otherwise
+        """
+        if table_name not in self.table_configs:
+            return {
+                "field": "columns",
+                "message": f"Table '{table_name}' in column '{column}' not found in configurations"
+            }
+        
+        table_config = self.table_configs[table_name]
+        if not self._column_exists_in_table_config(col_name, table_config):
+            return {
+                "field": "columns",
+                "message": f"Column '{column}' does not exist in table '{table_name}'"
+            }
+        
+        return None
+
+    def _validate_column_only_format(self, column: str, col_name: str) -> Optional[Dict]:
+        """
+        Validate a column in column-only format.
+        
+        Args:
+            column: The column name
+            col_name: The column name (same as column, for consistency)
+            
+        Returns:
+            Error dict if validation fails, None otherwise
+        """
+        for table_config in self.table_configs.values():
+            if self._column_exists_in_table_config(col_name, table_config):
+                return None
+        
+        return {
+            "field": "columns",
+            "message": f"Column '{column}' not found in any table"
+        }
+
     def _validate_columns(self, columns: List[str]) -> List[Dict]:
         errors = []
 
         for column in columns:
             if '.' in column:
                 table_name, col_name = column.split('.', 1)
-                if table_name in self.table_configs:
-                    table_config = self.table_configs[table_name]
-                    # Case-insensitive matching
-                    found = any(
-                        col_def.get('name').lower() == col_name.lower() or 
-                        any(col_name.lower() == alias.lower() for alias in col_def.get('field_aliases', []))
-                        for col_def in table_config.columns
-                    )
-                    if not found:
-                        errors.append({
-                            "field": "columns",
-                            "message": f"Column '{column}' does not exist in table '{table_name}'"
-                        })
-                else:
-                    errors.append({
-                        "field": "columns",
-                        "message": f"Table '{table_name}' in column '{column}' not found in configurations"
-                    })
+                error = self._validate_table_column_format(column, table_name, col_name)
+                if error:
+                    errors.append(error)
             else:
-                col_name = column
-                found = False
-                for table_config in self.table_configs.values():
-                    # Case-insensitive matching
-                    if any(
-                        col_def.get('name').lower() == col_name.lower() or 
-                        any(col_name.lower() == alias.lower() for alias in col_def.get('field_aliases', []))
-                        for col_def in table_config.columns
-                    ):
-                        found = True
-                        break
-                if not found:
-                    errors.append({
-                        "field": "columns",
-                        "message": f"Column '{column}' not found in any table"
-                    })
+                error = self._validate_column_only_format(column, column)
+                if error:
+                    errors.append(error)
 
         return errors
 
@@ -422,6 +494,88 @@ class SQLBuilder:
 
         return reverse_relations
 
+    def _collect_filtered_fields(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig]) -> set:
+        """
+        Collect all filtered field names (resolved to actual names).
+        
+        Args:
+            params: The request parameters
+            column_to_table_map: Mapping of columns to table configs
+            
+        Returns:
+            Set of resolved field names
+        """
+        filtered_fields = {self._resolve_field_name(f.field, column_to_table_map) for f in (params.filterBy or [])}
+        
+        # Also check if any aliases match mandatory fields
+        for f in (params.filterBy or []):
+            resolved = self._resolve_field_name(f.field, column_to_table_map)
+            if '.' in resolved:
+                _, col_name = resolved.split('.', 1)
+                filtered_fields.add(col_name)
+            else:
+                filtered_fields.add(resolved)
+        
+        return filtered_fields
+
+    def _is_mandatory_field_found(self, mand_field: str, filtered_fields: set) -> bool:
+        """
+        Check if a mandatory field is found in filtered fields (case-insensitive).
+        
+        Args:
+            mand_field: The mandatory field name
+            filtered_fields: Set of filtered field names
+            
+        Returns:
+            True if mandatory field is found, False otherwise
+        """
+        # Case-insensitive check in filtered_fields
+        if any(f.lower() == mand_field.lower() for f in filtered_fields):
+            return True
+        
+        # Check if any filter field is an alias or case-variant for this mandatory field
+        for table_config in self.table_configs.values():
+            for col_def in table_config.columns:
+                actual_name = col_def.get('name')
+                aliases = col_def.get('field_aliases', [])
+                
+                # Check if mandatory field matches this column definition (case-insensitive)
+                if not self._matches_field_name(mand_field, actual_name, aliases):
+                    continue
+                
+                # Check if any filtered field matches (case-insensitive)
+                for filtered_field in filtered_fields:
+                    if self._matches_field_name(filtered_field, actual_name, aliases):
+                        return True
+        
+        return False
+
+    def _validate_mandatory_filters(self, params: GetDataParams, used_tables: Dict[str, TableConfig], 
+                                    column_to_table_map: Dict[str, TableConfig]) -> List[Dict]:
+        """
+        Validate that all mandatory filters are present.
+        
+        Args:
+            params: The request parameters
+            used_tables: Tables used in the query
+            column_to_table_map: Mapping of columns to table configs
+            
+        Returns:
+            List of validation errors
+        """
+        errors = []
+        filtered_fields = self._collect_filtered_fields(params, column_to_table_map)
+        
+        for table_name, config in used_tables.items():
+            for mand_field in config.mandatory_fields:
+                if not self._is_mandatory_field_found(mand_field, filtered_fields):
+                    errors.append({
+                        "field": "filterBy",
+                        "message": f"Table '{table_name}' requires a filter on column '{mand_field}'"
+                    })
+        
+        return errors
+
     def _collect_build_query_errors(self, params: GetDataParams) -> List[Dict]:
         """
         Collect all validation errors for a given request.
@@ -437,63 +591,22 @@ class SQLBuilder:
 
         # 2) Validate mandatory filters
         used_tables, column_to_table_map = self._get_explicitly_requested_tables(params)
-
-        # Resolve all filter fields to actual field names for comparison
-        filtered_fields = {self._resolve_field_name(f.field, column_to_table_map) for f in (params.filterBy or [])}
-
-        # Also check if any aliases match mandatory fields
-        for f in (params.filterBy or []):
-            resolved = self._resolve_field_name(f.field, column_to_table_map)
-            if '.' in resolved:
-                _, col_name = resolved.split('.', 1)
-                filtered_fields.add(col_name)
-            else:
-                filtered_fields.add(resolved)
-
-        for table_name, config in used_tables.items():
-            for mand_field in config.mandatory_fields:
-                # Check both the actual field name and if any alias matches (case-insensitive)
-                field_found = False
-
-                # Case-insensitive check in filtered_fields
-                if any(f.lower() == mand_field.lower() for f in filtered_fields):
-                    field_found = True
-                else:
-                    # Check if any filter field is an alias or case-variant for this mandatory field
-                    for table_config in self.table_configs.values():
-                        for col_def in table_config.columns:
-                            actual_name = col_def.get('name')
-                            aliases = col_def.get('field_aliases', [])
-                            # Check if mandatory field matches this column definition (case-insensitive)
-                            if (mand_field.lower() == actual_name.lower() or
-                                    any(mand_field.lower() == alias.lower() for alias in aliases)):
-                                # Check if any filtered field matches (case-insensitive)
-                                for filtered_field in filtered_fields:
-                                    if (filtered_field.lower() == actual_name.lower() or
-                                            any(filtered_field.lower() == alias.lower() for alias in aliases)):
-                                        field_found = True
-                                        break
-                                if field_found:
-                                    break
-                        if field_found:
-                            break
-
-                if not field_found:
-                    all_errors.append({
-                        "field": "filterBy",
-                        "message": f"Table '{table_name}' requires a filter on column '{mand_field}'"
-                    })
+        mandatory_errors = self._validate_mandatory_filters(params, used_tables, column_to_table_map)
+        if mandatory_errors:
+            all_errors.extend(mandatory_errors)
 
         # 3) Validate filter data types
         if params.filterBy:
             _, column_to_table_map = self._get_explicitly_requested_tables(params)
             filter_errors = self._validate_filter_data_types(params.filterBy, column_to_table_map)
-            all_errors.extend(filter_errors)
+            if filter_errors:
+                all_errors.extend(filter_errors)
 
         # 4) Validate measures
         if params.measures:
             measure_errors = self._validate_measures(params.measures)
-            all_errors.extend(measure_errors)
+            if measure_errors:
+                all_errors.extend(measure_errors)
 
         return all_errors
 
@@ -666,6 +779,130 @@ class SQLBuilder:
         }
         self.parameters = []
 
+    def _find_table_config_by_name(self, table_name: str) -> Optional[TableConfig]:
+        """
+        Find a table config by name (case-insensitive).
+        
+        Args:
+            table_name: The table name to find
+            
+        Returns:
+            TableConfig if found, None otherwise
+        """
+        if table_name in self.table_configs:
+            return self.table_configs[table_name]
+        
+        for name, config in self.table_configs.items():
+            if config.name.lower() == table_name.lower():
+                return config
+        
+        return None
+
+    def _add_table_column_mapping(self, column: str, resolved_column: str, col_name: str, 
+                                   config: TableConfig, column_to_table_map: Dict[str, TableConfig]):
+        """
+        Add column to table mapping for both original and resolved column names.
+        
+        Args:
+            column: Original column name
+            resolved_column: Resolved column name
+            col_name: Column name (without table prefix)
+            config: Table config to map to
+            column_to_table_map: Dictionary to update
+        """
+        column_to_table_map[col_name] = config
+        if column != resolved_column and '.' not in column:
+            column_to_table_map[column] = config
+
+    def _process_table_column_format(self, column: str, resolved_column: str, table_name: str, 
+                                    col_name: str, set_a: Dict[str, TableConfig],
+                                    column_to_table_map: Dict[str, TableConfig]):
+        """
+        Process a column in table.column format.
+        
+        Args:
+            column: Original column name
+            resolved_column: Resolved column name
+            table_name: Table name
+            col_name: Column name
+            set_a: Dictionary of tables to update
+            column_to_table_map: Dictionary of column mappings to update
+        """
+        config = self._find_table_config_by_name(table_name)
+        
+        if config:
+            set_a[table_name] = config
+            self._add_table_column_mapping(column, resolved_column, col_name, config, column_to_table_map)
+        else:
+            temp_config = TableConfig(table_name, 999, [])
+            set_a[table_name] = temp_config
+            self._add_table_column_mapping(column, resolved_column, col_name, temp_config, column_to_table_map)
+
+    def _find_best_table_for_column(self, column_name: str) -> Optional[TableConfig]:
+        """
+        Find the best table (by priority) that contains the given column.
+        
+        Args:
+            column_name: The column name to find
+            
+        Returns:
+            Best TableConfig if found, None otherwise
+        """
+        best_table = None
+        highest_priority = float('inf')
+
+        for config in self.table_configs.values():
+            for col_def in config.columns:
+                actual_name = col_def.get('name')
+                aliases = col_def.get('field_aliases', [])
+                if self._matches_field_name(column_name, actual_name, aliases):
+                    if config.priority < highest_priority:
+                        highest_priority = config.priority
+                        best_table = config
+                    break
+
+        return best_table
+
+    def _get_actual_field_name_from_table(self, column_name: str, table_config: TableConfig) -> Optional[str]:
+        """
+        Get the actual field name from a table config for a given column name.
+        
+        Args:
+            column_name: The column name (could be alias)
+            table_config: The table config to search
+            
+        Returns:
+            Actual field name if found, None otherwise
+        """
+        for col_def in table_config.columns:
+            actual_name = col_def.get('name')
+            aliases = col_def.get('field_aliases', [])
+            if self._matches_field_name(column_name, actual_name, aliases):
+                return actual_name
+        return None
+
+    def _process_column_only_format(self, column: str, resolved_column: str, 
+                                    set_a: Dict[str, TableConfig],
+                                    column_to_table_map: Dict[str, TableConfig]):
+        """
+        Process a column in column-only format.
+        
+        Args:
+            column: Original column name
+            resolved_column: Resolved column name
+            set_a: Dictionary of tables to update
+            column_to_table_map: Dictionary of column mappings to update
+        """
+        best_table = self._find_best_table_for_column(resolved_column)
+        
+        if best_table:
+            set_a[best_table.name] = best_table
+            actual_name = self._get_actual_field_name_from_table(resolved_column, best_table)
+            if actual_name:
+                column_to_table_map[actual_name] = best_table
+                if column != actual_name:
+                    column_to_table_map[column] = best_table
+
     def _get_explicitly_requested_tables(self, params: GetDataParams) -> Tuple[
         Dict[str, TableConfig], Dict[str, TableConfig]]:
         set_a = {}
@@ -673,67 +910,14 @@ class SQLBuilder:
         all_columns = params.get_all_columns()
 
         for column in all_columns:
-            # Resolve alias to actual field name first
             resolved_column = self._resolve_field_name(column)
             
             if '.' in resolved_column:
                 table_name, col_name = resolved_column.split('.', 1)
-
-                if table_name in self.table_configs:
-                    config = self.table_configs[table_name]
-                    set_a[table_name] = config
-                    # Map both original column (for lookup) and resolved column name
-                    column_to_table_map[col_name] = config
-                    if column != resolved_column and '.' not in column:
-                        column_to_table_map[column] = config
-                else:
-                    found_config = None
-                    for name, config in self.table_configs.items():
-                        if config.name.lower() == table_name.lower():
-                            found_config = config
-                            break
-
-                    if found_config:
-                        set_a[table_name] = found_config
-                        column_to_table_map[col_name] = found_config
-                        if column != resolved_column and '.' not in column:
-                            column_to_table_map[column] = found_config
-                    else:
-                        temp_config = TableConfig(table_name, 999, [])
-                        set_a[table_name] = temp_config
-                        column_to_table_map[col_name] = temp_config
-                        if column != resolved_column and '.' not in column:
-                            column_to_table_map[column] = temp_config
+                self._process_table_column_format(column, resolved_column, table_name, col_name, 
+                                                 set_a, column_to_table_map)
             else:
-                column_name = resolved_column
-                best_table = None
-                highest_priority = float('inf')
-
-                for config in self.table_configs.values():
-                    for col_def in config.columns:
-                        actual_name = col_def.get('name')
-                        aliases = col_def.get('field_aliases', [])
-                        # Case-insensitive matching
-                        if (column_name.lower() == actual_name.lower() or 
-                            any(column_name.lower() == alias.lower() for alias in aliases)):
-                            if config.priority < highest_priority:
-                                highest_priority = config.priority
-                                best_table = config
-                            break
-
-                if best_table:
-                    set_a[best_table.name] = best_table
-                    # Map both original column (for lookup) and resolved column name
-                    # Use the actual field name from config for the resolved column
-                    for col_def in best_table.columns:
-                        actual_name = col_def.get('name')
-                        aliases = col_def.get('field_aliases', [])
-                        if (column_name.lower() == actual_name.lower() or 
-                            any(column_name.lower() == alias.lower() for alias in aliases)):
-                            column_to_table_map[actual_name] = best_table
-                            if column != actual_name:
-                                column_to_table_map[column] = best_table
-                            break
+                self._process_column_only_format(column, resolved_column, set_a, column_to_table_map)
 
         return set_a, column_to_table_map
 
@@ -1015,20 +1199,30 @@ class SQLBuilder:
 
         return None, []
 
-    def _build_group_by_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig],
-                               join_tables: Dict[str, TableConfig], is_aggregated: bool):
-        if not is_aggregated:
-            return
+    def _has_aggregates_in_select(self) -> bool:
+        """
+        Check if the SELECT clause contains any aggregate functions.
+        
+        Returns:
+            True if aggregates are found, False otherwise
+        """
+        aggregate_functions = {'COUNT', 'SUM', 'AVG', 'MAX', 'MIN'}
+        return any(
+            '(' in item and item.split('(')[0].upper() in aggregate_functions 
+            for item in self.query_parts['select']
+        )
 
-        has_aggregates = any(
-            '(' in item and item.split('(')[0].upper() in {'COUNT', 'SUM', 'AVG', 'MAX', 'MIN'} for item in
-            self.query_parts['select'])
-        if not has_aggregates:
-            return
-
-        group_by_items = []
-        main_table = self._determine_main_table(join_tables)
-
+    def _add_mandatory_fields_to_group_by(self, main_table: TableConfig, 
+                                         join_tables: Dict[str, TableConfig],
+                                         group_by_items: List[str]):
+        """
+        Add mandatory fields from main table and joined tables to group by items.
+        
+        Args:
+            main_table: The main table config
+            join_tables: Dictionary of joined table configs
+            group_by_items: List to add fields to
+        """
         for field in main_table.mandatory_fields:
             group_by_items.append(f"{field}")
 
@@ -1037,16 +1231,40 @@ class SQLBuilder:
                 for field in table_config.mandatory_fields:
                     group_by_items.append(f"{field}")
 
+    def _add_group_by_columns(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig],
+                              group_by_items: List[str]):
+        """
+        Add groupBy columns to group by items (resolving aliases).
+        
+        Args:
+            params: The request parameters
+            column_to_table_map: Mapping of columns to table configs
+            group_by_items: List to add columns to
+        """
         for col in params.groupBy or []:
-            # Resolve alias to actual field name
             resolved_col = self._resolve_field_name(col, column_to_table_map)
+            
             if '.' in resolved_col:
-                table_name, col_name = resolved_col.split('.', 1)
+                _, col_name = resolved_col.split('.', 1)
                 if col_name not in group_by_items:
                     group_by_items.append(col_name)
             else:
                 if resolved_col not in group_by_items:
                     group_by_items.append(resolved_col)
+
+    def _build_group_by_clause(self, params: GetDataParams, column_to_table_map: Dict[str, TableConfig],
+                               join_tables: Dict[str, TableConfig], is_aggregated: bool):
+        if not is_aggregated:
+            return
+
+        if not self._has_aggregates_in_select():
+            return
+
+        group_by_items = []
+        main_table = self._determine_main_table(join_tables)
+
+        self._add_mandatory_fields_to_group_by(main_table, join_tables, group_by_items)
+        self._add_group_by_columns(params, column_to_table_map, group_by_items)
 
         if group_by_items:
             self.query_parts['group_by'] = group_by_items
@@ -1075,6 +1293,134 @@ class SQLBuilder:
             if offset > 0:
                 self.query_parts['offset'] = str(offset)
 
+    def _is_column_restricted_table_format(self, table_name: str, col_name: str) -> bool:
+        """
+        Check if a column in table.column format is restricted.
+        
+        Args:
+            table_name: The table name
+            col_name: The column name
+            
+        Returns:
+            True if restricted, False otherwise
+        """
+        if table_name not in self.table_configs:
+            return False
+        
+        restricted_attrs = self.table_configs[table_name].restricted_attributes
+        return any(col_name.lower() == attr.lower() for attr in restricted_attrs)
+
+    def _is_column_restricted_column_format(self, column: str, resolved_column: str,
+                                           column_to_table_map: Dict[str, TableConfig]) -> bool:
+        """
+        Check if a column in column-only format is restricted.
+        
+        Args:
+            column: Original column name
+            resolved_column: Resolved column name
+            column_to_table_map: Mapping of columns to table configs
+            
+        Returns:
+            True if restricted, False otherwise
+        """
+        table_config = column_to_table_map.get(resolved_column) or column_to_table_map.get(column)
+        if not table_config:
+            return False
+        
+        restricted_attrs = table_config.restricted_attributes
+        return (any(resolved_column.lower() == attr.lower() for attr in restricted_attrs) or
+                any(column.lower() == attr.lower() for attr in restricted_attrs))
+
+    def _is_column_restricted(self, column: str, resolved_column: str,
+                             column_to_table_map: Dict[str, TableConfig]) -> bool:
+        """
+        Check if a column is restricted (handles both formats).
+        
+        Args:
+            column: Original column name
+            resolved_column: Resolved column name
+            column_to_table_map: Mapping of columns to table configs
+            
+        Returns:
+            True if restricted, False otherwise
+        """
+        if '.' in resolved_column:
+            table_name, col_name = resolved_column.split('.', 1)
+            return self._is_column_restricted_table_format(table_name, col_name)
+        else:
+            return self._is_column_restricted_column_format(column, resolved_column, column_to_table_map)
+
+    def _build_distinct_query_table_format(self, table_name: str, col_name: str) -> str:
+        """
+        Build a distinct values query for table.column format.
+        
+        Args:
+            table_name: The table name
+            col_name: The column name
+            
+        Returns:
+            SQL query string
+        """
+        return f"SELECT DISTINCT {col_name} FROM {table_name} WHERE {col_name} IS NOT NULL"
+
+    def _build_distinct_query_column_format(self, resolved_column: str, column: str,
+                                           column_to_table_map: Dict[str, TableConfig]) -> Optional[str]:
+        """
+        Build a distinct values query for column-only format.
+        
+        Args:
+            resolved_column: Resolved column name
+            column: Original column name
+            column_to_table_map: Mapping of columns to table configs
+            
+        Returns:
+            SQL query string if table config found, None otherwise
+        """
+        table_config = column_to_table_map.get(resolved_column) or column_to_table_map.get(column)
+        if not table_config:
+            return None
+        
+        return f"SELECT DISTINCT {resolved_column} FROM {table_config.name} WHERE {resolved_column} IS NOT NULL"
+
+    def _build_distinct_query_for_column(self, column: str, resolved_column: str,
+                                        column_to_table_map: Dict[str, TableConfig]) -> Optional[str]:
+        """
+        Build a distinct values query for a column (handles both formats).
+        
+        Args:
+            column: Original column name
+            resolved_column: Resolved column name
+            column_to_table_map: Mapping of columns to table configs
+            
+        Returns:
+            SQL query string if successful, None otherwise
+        """
+        if '.' in resolved_column:
+            table_name, col_name = resolved_column.split('.', 1)
+            return self._build_distinct_query_table_format(table_name, col_name)
+        else:
+            return self._build_distinct_query_column_format(resolved_column, column, column_to_table_map)
+
+    def _process_distinct_column(self, column: str, column_to_table_map: Dict[str, TableConfig]) -> Tuple[str, str, Optional[str], List[Any]]:
+        """
+        Process a single column for distinct values query.
+        
+        Args:
+            column: The column name
+            column_to_table_map: Mapping of columns to table configs
+            
+        Returns:
+            Tuple of (column, data_type, query, parameters)
+        """
+        resolved_column = self._resolve_field_name(column, column_to_table_map)
+        data_type = self._get_column_data_type(resolved_column, column_to_table_map) or "UNKNOWN"
+
+        if self._is_column_restricted(column, resolved_column, column_to_table_map):
+            return (column, data_type, None, [])
+
+        query = self._build_distinct_query_for_column(column, resolved_column, column_to_table_map)
+        return (column, data_type, query, [])
+
     def build_distinct_values_query(self, columns: List[str]) -> List[Tuple[str, str, List[Any]]]:
         queries = []
         errors = self._validate_columns(columns)
@@ -1084,45 +1430,8 @@ class SQLBuilder:
         _, column_to_table_map = self._get_explicitly_requested_tables(GetDataParams(groupBy=columns))
 
         for column in columns:
-            # Resolve alias to actual field name
-            resolved_column = self._resolve_field_name(column, column_to_table_map)
-            data_type = self._get_column_data_type(resolved_column, column_to_table_map)
-            if not data_type:
-                data_type = "UNKNOWN"
-
-            # Check if column is restricted (use resolved column name)
-            is_restricted = False
-            if '.' in resolved_column:
-                table_name, col_name = resolved_column.split('.', 1)
-                if table_name in self.table_configs:
-                    # Case-insensitive check in restricted_attributes
-                    restricted_attrs = self.table_configs[table_name].restricted_attributes
-                    if any(col_name.lower() == attr.lower() for attr in restricted_attrs):
-                        is_restricted = True
-            else:
-                table_config = column_to_table_map.get(resolved_column) or column_to_table_map.get(column)
-                if table_config:
-                    # Case-insensitive check in restricted attributes
-                    restricted_attrs = table_config.restricted_attributes
-                    if (any(resolved_column.lower() == attr.lower() for attr in restricted_attrs) or
-                        any(column.lower() == attr.lower() for attr in restricted_attrs)):
-                        is_restricted = True
-
-            if is_restricted:
-                queries.append((column, data_type, None, []))
-                continue
-
-            # Build query for non-restricted columns (use resolved column name)
-            if '.' in resolved_column:
-                table_name, col_name = resolved_column.split('.', 1)
-                query = f"SELECT DISTINCT {col_name} FROM {table_name} WHERE {col_name} IS NOT NULL"
-            else:
-                table_config = column_to_table_map.get(resolved_column) or column_to_table_map.get(column)
-                if not table_config:
-                    continue
-                query = f"SELECT DISTINCT {resolved_column} FROM {table_config.name} WHERE {resolved_column} IS NOT NULL"
-
-            queries.append((column, data_type, query, []))
+            query_tuple = self._process_distinct_column(column, column_to_table_map)
+            queries.append(query_tuple)
 
         return queries
 
