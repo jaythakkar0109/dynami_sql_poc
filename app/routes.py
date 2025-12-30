@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, status, Request
-from app.schemas import GetDataParams, QueryResponse, GetAttributesRequest, GetAttributesResponse, ColumnMetadata
+from app.schemas import GetDataParams, QueryResponse, GetAttributesRequest, GetAttributesResponse, ColumnMetadata, AttributeFieldData
 from app.sql_builder import SQLBuilder, ValidationError
 from app.database import execute_query
 from app.utils import get_correlation_id_and_soeid, gen_props, gen_headers
@@ -145,21 +145,28 @@ async def get_attributes(params: GetAttributesRequest, request: Request):
                                     execution_time=execution_time,
                                     attributes_count=len(results)))
 
-        column_metadata = [
-            ColumnMetadata(
-                field=col,
-                type=sql_builder._get_column_data_type(col, column_to_table_map) or "UNKNOWN"
-            ) for col in params.columns
-        ]
-        column_metadata_dicts = [
-            {"field": col.field, "type": col.type}
-            for col in column_metadata
-        ]
-        response_data = {"fields":column_metadata_dicts,"values":results}
+        # Transform results to new format: group by field and extract values
+        transformed_data = []
+        for col in params.columns:
+            # Skip restricted columns that were filtered out from the query
+            if col in restricted_columns:
+                continue
+                
+            col_type = sql_builder._get_column_data_type(col, column_to_table_map) or "UNKNOWN"
+            # Extract all values for this column from results
+            col_values = [row[col] for row in results if col in row]
+            
+            transformed_data.append(
+                AttributeFieldData(
+                    field=col,
+                    type=col_type,
+                    values=col_values
+                )
+            )
 
         return GetAttributesResponse(
             query_id=query_id,
-            data=response_data,
+            data=transformed_data,
             query=main_query
         )
 

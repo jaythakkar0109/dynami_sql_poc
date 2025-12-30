@@ -108,12 +108,16 @@ def test_get_attributes_success(mock_yaml_load, mock_env):
 
         assert "query_id" in response_json, "Response must contain query_id"
         assert response_json["query"] == "SELECT DISTINCT uidtype FROM newwpnl WHERE uidtype IS NOT NULL"
-        assert response_json["data"] == {
-            "fields": [{"field": "uidtype", "type": "VARCHAR"}],
-            "values": [{"uidtype": "value1"}, {"uidtype": "value2"}]
-        }
-        assert len(response_json["data"]["values"]) == 2, "Expected 2 distinct values"
-        assert len(response_json["data"]["fields"]) == 1, "Expected 1 field in metadata"
+        assert response_json["data"] == [
+            {
+                "field": "uidtype",
+                "type": "VARCHAR",
+                "values": ["value1", "value2"]
+            }
+        ]
+        assert len(response_json["data"]) == 1, "Expected 1 field in data"
+        assert len(response_json["data"][0]["values"]) == 2, "Expected 2 distinct values"
+
 def test_get_attributes_validation_error(mock_yaml_load, mock_env):
     with patch("app.routes.SQLBuilder") as mock_builder:
         mock_builder_instance = mock_builder.return_value
