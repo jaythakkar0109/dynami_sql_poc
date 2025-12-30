@@ -74,8 +74,8 @@ class GetDataParams(BaseModel):
     groupBy: Optional[List[str]] = []
     filterBy: Optional[List[FilterModel]] = []
     sortBy: Optional[List[SortModel]] = []
-    page: Optional[int] = 1
-    page_size: Optional[int] = 10
+    page: Optional[int] = None
+    page_size: Optional[int] = None
 
     @field_validator('page')
     @classmethod
@@ -183,7 +183,12 @@ class GetAttributesRequest(BaseModel):
     columns: List[str]
     filterBy: Optional[List[FilterModel]] = None
 
+class AttributeFieldData(BaseModel):
+    field: str
+    type: str
+    values: List[Any]
+
 class GetAttributesResponse(BaseModel):
     query_id: str
     query : str
-    data: dict
+    data: List[AttributeFieldData]
